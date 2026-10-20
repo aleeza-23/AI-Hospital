@@ -1,0 +1,49 @@
+{
+  "run_name": "baseline_medqa_gptoss120b-20261020-192932",
+  "num_cases": 35,
+  "accuracy": 0.7429,
+  "accuracy_ci95": [
+    0.5793,
+    0.8584
+  ],
+  "num_correct": 26,
+  "avg_turns": 6.543,
+  "avg_tests": 3.229,
+  "timeout_rate": 0.0,
+  "error_rate": 0.0,
+  "total_prompt_tokens": 219987,
+  "total_completion_tokens": 59305,
+  "total_latency_s": 455.85,
+  "per_role_usage": {
+    "doctor": {
+      "prompt_tokens": 103489,
+      "completion_tokens": 46855,
+      "calls": 229,
+      "latency_s": 265.24426770041464
+    },
+    "patient": {
+      "prompt_tokens": 34195,
+      "completion_tokens": 4836,
+      "calls": 80,
+      "latency_s": 58.914263900136575
+    },
+    "measurement": {
+      "prompt_tokens": 76937,
+      "completion_tokens": 6759,
+      "calls": 113,
+      "latency_s": 104.65413400012767
+    },
+    "judge": {
+      "prompt_tokens": 5366,
+      "completion_tokens": 855,
+      "calls": 35,
+      "latency_s": 27.03660370002035
+    },
+    "image_reader": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "calls": 0,
+      "latency_s": 0.0
+    }
+  }
+}

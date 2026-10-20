@@ -1,0 +1,43 @@
+{
+  "run_name": "smoke_mock-20261020-185124",
+  "num_cases": 3,
+  "accuracy": 0.3333,
+  "accuracy_ci95": [
+    0.0615,
+    0.7923
+  ],
+  "num_correct": 1,
+  "avg_turns": 3.0,
+  "avg_tests": 1.0,
+  "timeout_rate": 0.0,
+  "error_rate": 0.0,
+  "total_prompt_tokens": 2012,
+  "total_completion_tokens": 90,
+  "total_latency_s": 0.0,
+  "per_role_usage": {
+    "doctor": {
+      "prompt_tokens": 1260,
+      "completion_tokens": 54,
+      "calls": 9,
+      "latency_s": 0.0
+    },
+    "patient": {
+      "prompt_tokens": 406,
+      "completion_tokens": 27,
+      "calls": 3,
+      "latency_s": 0.0
+    },
+    "measurement": {
+      "prompt_tokens": 346,
+      "completion_tokens": 9,
+      "calls": 3,
+      "latency_s": 0.0
+    },
+    "judge": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "calls": 0,
+      "latency_s": 0.0
+    }
+  }
+}

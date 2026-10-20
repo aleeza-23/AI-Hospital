@@ -1,0 +1,18 @@
+run_name: smoke_mock
+dataset: data/smoke/smoke_cases.jsonl
+num_cases: null
+max_turns: 10
+workers: 1
+output_dir: runs
+judge_method: exact
+agents:
+  doctor:
+    provider: mock
+    model: mock
+    diagnosis: Myasthenia gravis
+  patient:
+    provider: mock
+    model: mock
+  measurement:
+    provider: mock
+    model: mock
