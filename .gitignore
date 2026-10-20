@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets
+.env
+
+# Data: raw downloads are re-fetched by scripts/prepare_data.py.
+# Never commit credentialed data (MIMIC-IV).
+data/raw/
+data/processed/mimiciv*
+
+# Run outputs (commit selected samples under runs/sample/ only)
+runs/*
+!runs/sample/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
