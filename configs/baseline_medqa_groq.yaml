@@ -1,0 +1,33 @@
+# Multi-Agent Clinic baseline (paper Table 1) on MedQA via Groq.
+# Groq no longer serves LLaMA 3.3 70B (paper baseline 54.7%); gpt-oss-120b is the strongest
+# open-weight chat model available there. List options: python scripts/list_models.py
+# Requires GROQ_API_KEY in .env. Only the doctor model should vary between runs;
+# patient / measurement / judge stay fixed so results are comparable.
+#
+# Free-tier limits are per model (gpt-oss-120b: 8000 tokens/min) and Groq counts
+# prompt + max_tokens against them, so:
+#   * patient + measurement run on gpt-oss-20b (a separate rate-limit bucket);
+#   * max_tokens is kept just large enough for the hidden reasoning + a short reply.
+# If you see "Empty reply" warnings, raise that role's max_tokens.
+run_name: baseline_medqa_gptoss120b
+dataset: data/processed/medqa.jsonl
+max_turns: 20
+workers: 1          # the provider waits out 429s using Groq's retry-after
+judge_method: llm
+
+_groq: &groq
+  provider: openai_compat
+  base_url: https://api.groq.com/openai/v1
+  api_key_env: GROQ_API_KEY
+  model: openai/gpt-oss-120b
+  extra_body: {reasoning_effort: low}
+
+_groq_small: &groq_small
+  <<: *groq
+  model: openai/gpt-oss-20b
+
+agents:
+  doctor:      {<<: *groq,       temperature: 0.2, max_tokens: 1024}
+  patient:     {<<: *groq_small, temperature: 0.2, max_tokens: 512}
+  measurement: {<<: *groq_small, temperature: 0.0, max_tokens: 512}
+  judge:       {<<: *groq,       temperature: 0.0, max_tokens: 256}

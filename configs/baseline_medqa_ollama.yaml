@@ -1,0 +1,18 @@
+# Same baseline with a small local model through Ollama (free, for development).
+#   ollama pull qwen2.5:7b && ollama serve
+run_name: baseline_medqa_qwen7b_local
+dataset: data/processed/medqa_dev.jsonl
+max_turns: 20
+workers: 1
+judge_method: llm
+
+_local: &local
+  provider: openai_compat
+  base_url: http://localhost:11434/v1
+  model: qwen2.5:7b
+
+agents:
+  doctor:      {<<: *local, temperature: 0.2, max_tokens: 256}
+  patient:     {<<: *local, temperature: 0.2, max_tokens: 200}
+  measurement: {<<: *local, temperature: 0.0, max_tokens: 300}
+  judge:       {<<: *local, temperature: 0.0, max_tokens: 5}

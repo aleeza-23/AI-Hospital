@@ -1,0 +1,9 @@
+# Offline end-to-end check: no API key, deterministic scripted agents.
+run_name: smoke_mock
+dataset: data/smoke/smoke_cases.jsonl
+max_turns: 10
+judge_method: exact
+agents:
+  doctor:      {provider: mock, model: mock, diagnosis: Myasthenia gravis}
+  patient:     {provider: mock, model: mock}
+  measurement: {provider: mock, model: mock}

@@ -1,0 +1,19 @@
+# Multimodal NEJM baseline: doctor can "REQUEST IMAGES"; a VLM writes the image report.
+# Requires OPENAI_API_KEY. Swap image_reader for a vLLM-served Qwen2-VL / LLaVA to stay open-source.
+run_name: baseline_nejm_gpt4o
+dataset: data/processed/nejm.jsonl
+max_turns: 20
+workers: 2
+judge_method: llm
+
+_oai: &oai
+  provider: openai_compat
+  api_key_env: OPENAI_API_KEY
+  model: gpt-4o
+
+agents:
+  doctor:       {<<: *oai, temperature: 0.2, max_tokens: 256}
+  patient:      {<<: *oai, temperature: 0.2, max_tokens: 200}
+  measurement:  {<<: *oai, temperature: 0.0, max_tokens: 300}
+  judge:        {<<: *oai, temperature: 0.0, max_tokens: 5}
+  image_reader: {<<: *oai, temperature: 0.0, max_tokens: 400}
