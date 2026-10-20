@@ -27,7 +27,7 @@ python scripts/run_baseline.py --config configs/smoke_mock.yaml -v   # offline d
 python scripts/prepare_data.py
 
 # 2. Keys
-cp .env.example .env        # then add e.g. GROQ_API_KEY=...
+cp .env.example .env        
 
 # 3. Run (first 20 cases, live dialogue)
 python scripts/run_baseline.py --config configs/baseline_medqa_groq.yaml --n 20 -v
@@ -62,7 +62,7 @@ A sample is committed in [runs/sample/smoke_mock](runs/sample/smoke_mock).
 | `medqa_ext` | 215 | AgentClinic | |
 | `nejm` | 15 | AgentClinic | image-based; needs `image_reader` (VLM) |
 | `nejm_ext` | 120 | AgentClinic | |
-| `mimiciv` | 288 | PhysioNet (credentialed) | `--datasets mimiciv --local <file>`; **never commit** |
+
 
 Each dataset is split into `<name>_dev.jsonl` (prompt iteration) and `<name>_test.jsonl` (seed 0).
 `data/smoke/` holds 3 hand-written cases for tests.
@@ -88,10 +88,6 @@ src/medsim/
   pipeline.py       config -> run -> episodes.jsonl + metrics.json
 tests/              pytest suite (runs offline with mock provider)
 ```
-
-## Contributing
-
-Work on feature branches (`feat/<area>`), open a PR into `main`, and get one review. Run `pytest -q` before pushing (CI runs it too).
 
 ## Disclaimer
 
