@@ -1,0 +1,17 @@
+# E3 full SafeWard: verified memory gate + chain of thought + the G2 Safety
+# Officer reviewing every management plan. This is the complete system the Phase 1
+# proposal describes, and it is runnable because the gate reads the officer's
+# verdicts: GatedMemory refuses to store an outcome that was vetoed on safety.
+# Needs a safety_officer provider; build_safety will not fall back to the doctor.
+# The `agents` block is injected by experiments/run_consultation.py from --providers.
+run_name: consultation_e3_full
+dataset: data/processed/medqa_test.jsonl
+max_turns: 20
+workers: 1          # REQUIRED: one memory is shared across a run, so order matters
+judge_method: llm
+features:
+  memory: gated
+  safety: officer
+  cot: true
+  ask_plan: true    # the officer reviews a plan, so the doctor must write one
+  memory_k: 3

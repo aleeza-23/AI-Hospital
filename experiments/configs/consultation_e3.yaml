@@ -1,0 +1,14 @@
+# E3 prep: SafeWard's verified memory gate + chain of thought, no safety review.
+# Isolates the gate against E2, so any accuracy difference is the gate alone.
+# The `agents` block is injected by experiments/run_consultation.py from --providers.
+run_name: consultation_e3
+dataset: data/processed/medqa_test.jsonl
+max_turns: 20
+workers: 1          # REQUIRED: one memory is shared across a run, so order matters
+judge_method: llm
+features:
+  memory: gated
+  safety: none
+  cot: true
+  ask_plan: false
+  memory_k: 3

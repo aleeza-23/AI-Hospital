@@ -1,0 +1,13 @@
+# E1 baseline: all Phase 2 features off. This is the Phase 1 system, and the
+# reference every other consultation configuration is compared against.
+# The `agents` block is injected by experiments/run_consultation.py from --providers.
+run_name: consultation_e1
+dataset: data/processed/medqa_test.jsonl   # the runner selects a seeded subset
+max_turns: 20
+workers: 1
+judge_method: llm
+features:
+  memory: none
+  safety: none
+  cot: false
+  ask_plan: false
