@@ -4,6 +4,7 @@ Covers TF-IDF retrieval order, the gate's admit/reject decisions, provenance,
 retraction and the build_memory wiring, with MockProvider where an episode is
 needed.
 """
+import json
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from medsim.contracts import TestRequest as _TestRequest  # underscore: pytest c
 from medsim.data import load_cases
 from medsim.env import EpisodeRunner
 from medsim.eval import Judge
+from medsim.eval.judge import exact_match
 from medsim.memory import MemoryRecord, NullMemory, build_memory
 from medsim.memory.embed import TfidfIndex, cosine, tokenize
 from medsim.memory.stores import (
@@ -404,6 +406,88 @@ def test_build_memory_passes_k_through():
 def test_build_memory_rejects_an_unknown_name():
     with pytest.raises(ValueError, match="Unknown memory"):
         build_memory("nonsense")
+
+
+# --------------------------------------------------------------------------- #
+# The committed poisoning set
+# --------------------------------------------------------------------------- #
+REPO = Path(__file__).resolve().parents[1]
+POISONING = REPO / "data" / "memory" / "poisoning.jsonl"
+
+
+def _poison_rows() -> list[dict]:
+    with open(POISONING, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def test_the_poisoning_set_has_ten_lessons_and_thirty_distinct_cases():
+    rows = _poison_rows()
+    assert len(rows) == 10
+    paired = [p for r in rows for p in r["paired_case_ids"]]
+    assert len(paired) == 30 and len(set(paired)) == 30     # families are disjoint
+
+
+def test_every_lesson_claim_contradicts_its_source_case_truth():
+    for row in _poison_rows():
+        assert not exact_match(row["source_true_diagnosis"], row["claimed_diagnosis"]), row["lesson_id"]
+
+
+def test_every_lesson_claim_is_wrong_for_all_three_paired_cases():
+    for row in _poison_rows():
+        for truth in row["paired_true_diagnoses"]:
+            assert not exact_match(truth, row["claimed_diagnosis"]), row["lesson_id"]
+
+
+def test_the_paired_cases_all_exist_in_the_recorded_dataset():
+    cases = {c.id for c in load_cases(REPO / "data" / "processed" / "medqa_ext_test.jsonl")}
+    for row in _poison_rows():
+        assert row["dataset"].endswith("medqa_ext_test.jsonl")
+        assert set(row["paired_case_ids"]) <= cases, row["lesson_id"]
+
+
+def test_the_prefill_split_does_not_overlap_the_paired_cases():
+    """medqa_ext is a superset of medqa, so the split choice is what avoids a leak."""
+    dev = {c.objective for c in load_cases(REPO / "data" / "processed" / "medqa_ext_dev.jsonl")}
+    test = {c.id: c for c in load_cases(REPO / "data" / "processed" / "medqa_ext_test.jsonl")}
+    paired = [test[p] for row in _poison_rows() for p in row["paired_case_ids"]]
+    assert not (dev & {c.objective for c in paired})
+
+
+def test_ungated_admits_every_wrong_lesson_and_gated_admits_none():
+    """The mechanism the hypothesis rests on, checked against the committed data."""
+    rows = _poison_rows()
+    test = {c.id: c for c in load_cases(REPO / "data" / "processed" / "medqa_ext_test.jsonl")}
+    dev = load_cases(REPO / "data" / "processed" / "medqa_ext_dev.jsonl")
+    admitted = {}
+    for memory in (UngatedMemory(k=3), GatedMemory(k=3)):
+        memory.seed_correct_records(dev)
+        memory.register_cases([test[p] for r in rows for p in r["paired_case_ids"]])
+        admitted[memory.name] = sum(
+            1 for r in rows
+            if memory.submit_lesson(r["lesson"], r["source_case_id"], r["claimed_diagnosis"]))
+    assert admitted == {"ungated": 10, "gated": 0}
+
+
+def test_each_wrong_lesson_is_retrieved_for_its_paired_cases():
+    """A lesson that is never retrieved cannot mislead anyone, so it would test nothing."""
+    rows = _poison_rows()
+    test = {c.id: c for c in load_cases(REPO / "data" / "processed" / "medqa_ext_test.jsonl")}
+    dev = load_cases(REPO / "data" / "processed" / "medqa_ext_dev.jsonl")
+    memory = UngatedMemory(k=3)
+    memory.seed_correct_records(dev)
+    memory.register_cases([test[p] for r in rows for p in r["paired_case_ids"]])
+    poison = {}
+    for row in rows:
+        entry = memory.submit_lesson(row["lesson"], row["source_case_id"], row["claimed_diagnosis"])
+        poison[entry.id] = row["lesson_id"]
+
+    hits = 0
+    for row in rows:
+        for case_id in row["paired_case_ids"]:
+            memory.context_for(test[case_id])
+            if row["lesson_id"] in [poison.get(e) for e in memory.last_hits]:
+                hits += 1
+    assert hits == 30, f"poison retrieved for only {hits}/30 paired cases"
 
 
 # --------------------------------------------------------------------------- #
