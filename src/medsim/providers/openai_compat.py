@@ -34,18 +34,33 @@ class OpenAICompatProvider(LLMProvider):
         self.extra_body = extra_body or {}
         from openai import OpenAI  # imported lazily so mock runs need no SDK
 
-        api_key = os.environ.get(api_key_env)
-        if not api_key:
+        # Extra keys GROQ_API_KEY_2, GROQ_API_KEY_3, ... (one per team member's free
+        # account) are used in turn when a key hits its DAILY limit.
+        keys = [os.environ.get(api_key_env)] + [os.environ.get(f"{api_key_env}_{i}") for i in range(2, 10)]
+        keys = [k for k in keys if k]
+        if not keys:
             # Local servers (vLLM/Ollama) accept any key.
             if base_url and ("localhost" in base_url or "127.0.0.1" in base_url):
-                api_key = "local"
+                keys = ["local"]
             else:
                 raise RuntimeError(
                     f"Environment variable {api_key_env} is not set "
                     f"(needed for model {model!r} at {base_url or 'api.openai.com'})."
                 )
-        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout, max_retries=0)
+        self.clients = [OpenAI(api_key=k, base_url=base_url, timeout=timeout, max_retries=0) for k in keys]
+        self.key_index = 0
         self.max_retries = max_retries
+
+    @property
+    def client(self):
+        return self.clients[self.key_index]
+
+    def _rotate_key(self) -> bool:
+        if self.key_index + 1 < len(self.clients):
+            self.key_index += 1
+            log.warning("Daily limit reached on %s; switching to API key #%d", self.model, self.key_index + 1)
+            return True
+        return False
 
     def chat(self, messages: list[ChatMessage], **overrides: Any) -> LLMResponse:
         params = {
@@ -67,6 +82,8 @@ class OpenAICompatProvider(LLMProvider):
                         f"{self.model!r} at {self.client.base_url}: {exc}. "
                         "Check the model id (python scripts/list_models.py) and your API key."
                     ) from exc
+                if _is_daily_limit(exc) and self._rotate_key():
+                    continue
                 if attempt == self.max_retries or not _is_retryable(exc):
                     raise
                 wait = _retry_after(exc)
@@ -121,6 +138,12 @@ def _retry_after(exc: Exception) -> Optional[float]:
         value = float(m.group(1))
         return value / 1000 if m.group(2) == "ms" else value
     return None
+
+
+def _is_daily_limit(exc: Exception) -> bool:
+    """Groq reports daily quotas as 'tokens per day (TPD)' / 'requests per day (RPD)'."""
+    msg = str(exc).lower()
+    return getattr(exc, "status_code", None) == 429 and ("per day" in msg or "(tpd)" in msg or "(rpd)" in msg)
 
 
 def _is_config_error(exc: Exception) -> bool:
