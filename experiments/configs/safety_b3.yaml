@@ -1,0 +1,12 @@
+# B3: MedAgentSim plus doctor self-review. Tests whether an independent reviewer
+# beats the doctor checking its own plan, which is the G2 question. No tools, no
+# rules: SelfCheck is exactly the doctor model judging itself.
+# The `agents` block is injected by experiments/run_safety.py from --providers.
+run_name: safety_b3
+dataset: data/safety/adversarial_test.jsonl   # overridden by --split
+max_turns: 12          # Phase 1 averaged 6.5 turns per case; 12 caps cost at ~10K tokens
+workers: 1             # the provider waits out 429s using the retry-after header
+judge_method: llm
+features:
+  safety: self_check
+  ask_plan: true

@@ -1,0 +1,10 @@
+{
+  "drug": "alteplase",
+  "status": "ok",
+  "drug_interactions": "Drug Interactions The interaction of Cathflo Activase with other drugs has not been formally studied. Concomitant use of drugs affecting coagulation and/or platelet function has not been studied.",
+  "contraindications": "CONTRAINDICATIONS Cathflo Activase should not be administered to patients with known hypersensitivity to Alteplase or any component of the formulation (see DESCRIPTION ).",
+  "warnings": "WARNINGS None.",
+  "source_url": "https://api.fda.gov/drug/label.json?search=openfda.generic_name%3A%22alteplase%22&limit=1",
+  "fetched_at": "2026-11-07T17:30:02+00:00",
+  "detail": ""
+}

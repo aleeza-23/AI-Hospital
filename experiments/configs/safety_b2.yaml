@@ -1,0 +1,12 @@
+# B2: MedAgentSim, no safety review. The baseline the G2 hypothesis is measured against.
+# ask_plan is set explicitly: without a plan there is no unsafe action to measure.
+# The `agents` block is injected by experiments/run_safety.py from --providers,
+# so all three safety configs share one set of provider definitions.
+run_name: safety_b2
+dataset: data/safety/adversarial_test.jsonl   # overridden by --split
+max_turns: 12          # Phase 1 averaged 6.5 turns per case; 12 caps cost at ~10K tokens
+workers: 1             # the provider waits out 429s using the retry-after header
+judge_method: llm
+features:
+  safety: none
+  ask_plan: true

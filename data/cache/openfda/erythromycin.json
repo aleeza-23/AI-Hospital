@@ -1,0 +1,10 @@
+{
+  "drug": "erythromycin",
+  "status": "ok",
+  "drug_interactions": "",
+  "contraindications": "CONTRAINDICATIONS Erythromycin Topical Solution USP, 2% is contraindicated in those individuals who have shown hypersensitivity to any of its components.",
+  "warnings": "WARNINGS Pseudomembranous colitis has been reported with nearly all antibacterial agents, including erythromycin, and may range in severity from mild to life-threatening. Therefore, it is important to consider this diagnosis in patients who present with diarrhea subsequent to the administration of antibacterial agents. Treatment with antibacterial agents alters the normal flora of the colon and may permit overgrowth of clostridia. Studies indicate that a toxin produced by Clostridium difficile is one primary cause of “antibiotic-associated colitis”. After the diagnosis of pseudomembranous colitis has been established, therapeutic measures should be initiated. Mild cases of pseudomembranous colitis usually respond to drug discontinuation alone. In moderate to severe cases, consideration should be given to management with fluids and electrolytes, protein supplementation and treatment with an antibacterial drug clinically effective against C. difficile colitis.",
+  "source_url": "https://api.fda.gov/drug/label.json?search=openfda.generic_name%3A%22erythromycin%22&limit=1",
+  "fetched_at": "2026-11-07T17:36:54+00:00",
+  "detail": ""
+}

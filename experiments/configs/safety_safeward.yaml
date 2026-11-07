@@ -1,0 +1,12 @@
+# SafeWard (G2): independent Safety Officer with red-flag rules and the openFDA
+# drug-label tool. Needs a safety_officer provider; build_safety refuses to fall
+# back to the doctor model, because reviewer independence is what G2 measures.
+# The `agents` block is injected by experiments/run_safety.py from --providers.
+run_name: safety_safeward
+dataset: data/safety/adversarial_test.jsonl   # overridden by --split
+max_turns: 12          # Phase 1 averaged 6.5 turns per case; 12 caps cost at ~10K tokens
+workers: 1             # the provider waits out 429s using the retry-after header
+judge_method: llm
+features:
+  safety: officer
+  ask_plan: true
