@@ -1,11 +1,93 @@
 """G2 Safety: offline tests (no API key, no network).
 
-Covers the deterministic rule layer, the openFDA cache, verdict parsing, the
-unsafe-action grader and the build_safety wiring.
+Covers the deterministic rule layer, the openFDA cache, verdict parsing,
+information isolation, both reviewers and the build_safety wiring.
+Network access is blocked for every openFDA test by the `offline` fixture, so
+these pass in CI with no cache committed and no outbound requests.
 """
-from medsim.contracts import SafetyDecision
+from pathlib import Path
+from typing import Any
 
+import pytest
+
+from medsim.contracts import Case, Message, Role, SafetyDecision, Usage
+from medsim.providers.base import ChatMessage, LLMProvider, LLMResponse, ProviderConfigError
+from medsim.safety import build_safety, openfda
 from medsim.safety import rules as R
+from medsim.safety.officer import (
+    SafetyOfficer,
+    SelfCheck,
+    escalate,
+    gather_facts,
+    parse_verdict,
+)
+
+SMOKE = Path(__file__).resolve().parents[1] / "data" / "smoke" / "smoke_cases.jsonl"
+
+
+# --------------------------------------------------------------------------- #
+# Fixtures and stubs
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def offline(monkeypatch):
+    """Forbid openFDA network access, so a test can only see a stubbed cache."""
+    monkeypatch.setenv("OPENFDA_OFFLINE", "1")
+
+
+class StubProvider(LLMProvider):
+    """Returns one fixed reply and records what it was asked."""
+
+    name = "stub"
+
+    def __init__(self, reply: str = "", **kw: Any):
+        super().__init__(model="stub", **kw)
+        self.reply = reply
+        self.calls: list[list[ChatMessage]] = []
+
+    def chat(self, messages: list[ChatMessage], **overrides: Any) -> LLMResponse:
+        self.calls.append(messages)
+        return LLMResponse(text=self.reply, usage=Usage(prompt_tokens=10, completion_tokens=5, calls=1))
+
+
+class TwoReplyProvider(StubProvider):
+    """Walks a script, so a veto-then-approve revision can be tested."""
+
+    def __init__(self, replies: list[str]):
+        super().__init__()
+        self.replies = replies
+
+    def chat(self, messages: list[ChatMessage], **overrides: Any) -> LLMResponse:
+        self.calls.append(messages)
+        reply = self.replies[min(len(self.calls) - 1, len(self.replies) - 1)]
+        return LLMResponse(text=reply, usage=Usage(prompt_tokens=10, completion_tokens=5, calls=1))
+
+
+class FailingProvider(StubProvider):
+    def chat(self, messages: list[ChatMessage], **overrides: Any) -> LLMResponse:
+        raise RuntimeError("upstream 503")
+
+
+class ConfigErrorProvider(StubProvider):
+    def chat(self, messages: list[ChatMessage], **overrides: Any) -> LLMResponse:
+        raise ProviderConfigError("bad model id")
+
+
+def _case(correct_diagnosis: str = "Something", **kw: Any) -> Case:
+    return Case(id="t-0000", source="test", objective="Assess the patient.",
+                patient_info={"Demographics": "50-year-old"},
+                correct_diagnosis=correct_diagnosis, **kw)
+
+
+def _stub(cache_dir: Path, drug: str, **fields: str) -> None:
+    """Write a fake openFDA cache entry, as the brief's stubbed cache."""
+    label = openfda.DrugLabel(drug=drug, status="ok", **fields)
+    path = openfda.cache_path(drug, cache_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(label.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _sent(provider: StubProvider) -> str:
+    return "\n".join(m["content"] for call in provider.calls for m in call)
 
 
 # --------------------------------------------------------------------------- #
@@ -17,7 +99,7 @@ def test_extract_drugs_maps_brands_to_generics():
 
 
 def test_extract_drugs_respects_word_boundaries():
-    assert R.extract_drugs("aspirins") == []          # plural is not a match
+    assert R.extract_drugs("aspirins") == []          # a plural is not a match
     assert R.extract_drugs("baby aspirin 81mg") == ["aspirin"]
 
 
@@ -140,3 +222,271 @@ def test_dedupe_keeps_one_hit_per_code_most_severe_first():
 def test_issues_are_prefixed_for_the_audit_trail():
     hits = R.check_plan("Continue warfarin and add ibuprofen.")
     assert all(i.startswith("[rules] ") for i in R.issues(hits))
+
+
+# --------------------------------------------------------------------------- #
+# openFDA tool: cache-only, never touches the network in tests
+# --------------------------------------------------------------------------- #
+def test_canonical_resolves_brands_and_strips_doses():
+    assert openfda.canonical("Coumadin") == "warfarin"
+    assert openfda.canonical("  IBUPROFEN 400mg  ") == "ibuprofen"
+    assert openfda.canonical("TMP-SMX") == "trimethoprim-sulfamethoxazole"
+
+
+def test_cache_path_is_one_file_per_generic(tmp_path):
+    assert openfda.cache_path("Coumadin", tmp_path) == openfda.cache_path("warfarin", tmp_path)
+
+
+def test_lookup_reads_a_stubbed_cache_entry_without_network(tmp_path, offline):
+    _stub(tmp_path, "warfarin", drug_interactions="Avoid ibuprofen: bleeding risk.")
+    label = openfda.lookup("Coumadin", tmp_path)
+    assert label.status == "ok" and label.found
+    assert "ibuprofen" in label.drug_interactions
+
+
+def test_lookup_reports_offline_instead_of_raising(tmp_path, offline):
+    label = openfda.lookup("warfarin", tmp_path)
+    assert label.status == "offline" and not label.found and label.text == ""
+
+
+def test_drug_interactions_returns_empty_string_when_unknown(tmp_path, offline):
+    assert openfda.drug_interactions("nosuchdrug", tmp_path) == ""
+
+
+def test_a_corrupt_cache_entry_does_not_crash(tmp_path, offline):
+    path = openfda.cache_path("warfarin", tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+    assert openfda.lookup("warfarin", tmp_path).status == "offline"
+
+
+def test_relevant_excerpt_keeps_only_sentences_naming_a_co_prescribed_drug():
+    label = openfda.DrugLabel(
+        drug="warfarin", status="ok",
+        drug_interactions="Vitamin K lowers the INR. Ibuprofen increases bleeding risk. "
+                          "Store below 25C.")
+    excerpt, matched = openfda.relevant_excerpt(label, ["warfarin", "ibuprofen"])
+    assert matched == ["ibuprofen"]
+    assert "bleeding risk" in excerpt and "Store below" not in excerpt
+
+
+def test_evidence_records_one_tool_call_per_drug(tmp_path, offline):
+    _stub(tmp_path, "warfarin", drug_interactions="Ibuprofen increases bleeding risk.")
+    text, calls = openfda.evidence(["ibuprofen", "warfarin"], tmp_path)
+    assert [c.drug for c in calls] == ["ibuprofen", "warfarin"]
+    assert calls[0].status == "offline"          # not stubbed, and the network is off
+    assert calls[1].status == "ok" and calls[1].matched == ["ibuprofen"]
+    assert "warfarin" in text
+
+
+# --------------------------------------------------------------------------- #
+# Verdict parsing
+# --------------------------------------------------------------------------- #
+def test_parse_verdict_reads_decision_and_bullets():
+    decision, found = parse_verdict(
+        "DECISION: VETO\nISSUES:\n- warfarin + ibuprofen bleeding risk\n- discharge unsafe")
+    assert decision == SafetyDecision.VETO
+    assert found == ["warfarin + ibuprofen bleeding risk", "discharge unsafe"]
+
+
+def test_parse_verdict_accepts_sloppy_formatting():
+    assert parse_verdict("decision - [approve]")[0] == SafetyDecision.APPROVE
+    assert parse_verdict("DECISION: REVISE\nISSUES:\n1) dose too high")[1] == ["dose too high"]
+
+
+def test_parse_verdict_drops_placeholder_issues():
+    assert parse_verdict("DECISION: APPROVE\nISSUES:\n- none")[1] == []
+
+
+def test_parse_verdict_returns_none_when_there_is_no_decision_line():
+    assert parse_verdict("I think the plan looks fine honestly")[0] is None
+
+
+def test_escalate_takes_the_most_severe():
+    assert escalate(SafetyDecision.APPROVE, SafetyDecision.VETO) == SafetyDecision.VETO
+    assert escalate(SafetyDecision.REVISE, None) == SafetyDecision.REVISE
+    assert escalate(None, None) == SafetyDecision.APPROVE
+
+
+# --------------------------------------------------------------------------- #
+# Information isolation
+# --------------------------------------------------------------------------- #
+def test_gather_facts_excludes_raw_reasoning_plan_and_prior_review():
+    transcript = [
+        Message(role=Role.DOCTOR, content="Any chest pain?", turn=0,
+                raw="We should rule out ACS first. Any chest pain?"),
+        Message(role=Role.PATIENT, content="Yes, since this morning.", turn=0),
+        Message(role=Role.MEASUREMENT, content="RESULTS: troponin elevated", turn=1),
+        Message(role=Role.DOCTOR, content="PLAN: discharge home", turn=2),
+        Message(role=Role.SAFETY_OFFICER, content="VETO: unsafe discharge", turn=2),
+    ]
+    facts = gather_facts(transcript)
+    assert "rule out ACS" not in facts        # Message.raw is never read
+    assert "PLAN" not in facts and "VETO" not in facts
+    assert "troponin elevated" in facts and "since this morning" in facts
+
+
+def test_facts_only_hides_the_doctors_turns():
+    transcript = [Message(role=Role.DOCTOR, content="Any chest pain?", turn=0),
+                  Message(role=Role.PATIENT, content="Yes.", turn=0)]
+    assert "chest pain" not in gather_facts(transcript, facts_only=True)
+    assert "chest pain" in gather_facts(transcript, facts_only=False)
+
+
+def test_officer_prompt_never_contains_the_correct_diagnosis(tmp_path, offline):
+    provider = StubProvider("DECISION: APPROVE\nISSUES:\n- none")
+    officer = SafetyOfficer(provider, cache_dir=tmp_path)
+    officer.review(_case(correct_diagnosis="Aortic dissection"), "Musculoskeletal chest pain",
+                   "Discharge with ibuprofen.",
+                   [Message(role=Role.PATIENT, content="Chest pain since today.", turn=0)])
+    assert "Aortic dissection" not in _sent(provider)
+
+
+# --------------------------------------------------------------------------- #
+# SafetyOfficer behaviour
+# --------------------------------------------------------------------------- #
+def test_officer_approves_a_safe_plan(tmp_path, offline):
+    officer = SafetyOfficer(StubProvider("DECISION: APPROVE\nISSUES:\n- none"), cache_dir=tmp_path)
+    verdict = officer.review(_case(), "Streptococcal pharyngitis",
+                             "Amoxicillin 500mg TDS for 5 days, review in 48 hours.", [])
+    assert verdict.decision == SafetyDecision.APPROVE and verdict.issues == []
+    assert verdict.reviewer == "safety_officer"
+
+
+def test_rules_are_a_floor_the_model_cannot_undercut(tmp_path, offline):
+    """The model says APPROVE; the rules say VETO. The verdict must be VETO."""
+    officer = SafetyOfficer(StubProvider("DECISION: APPROVE\nISSUES:\n- none"), cache_dir=tmp_path)
+    verdict = officer.review(_case(), "Osteoarthritis",
+                             "Continue warfarin 5mg and add ibuprofen 400mg TDS.", [])
+    assert verdict.decision == SafetyDecision.VETO
+    assert any("warfarin + ibuprofen" in i for i in verdict.issues)
+
+
+def test_the_model_can_escalate_beyond_the_rules(tmp_path, offline):
+    officer = SafetyOfficer(StubProvider("DECISION: VETO\nISSUES:\n- missed sepsis"),
+                            cache_dir=tmp_path)
+    verdict = officer.review(_case(), "Viral illness", "Discharge with fluids.", [])
+    assert verdict.decision == SafetyDecision.VETO and "missed sepsis" in verdict.issues
+
+
+def test_officer_records_openfda_tool_calls(tmp_path, offline):
+    _stub(tmp_path, "warfarin", drug_interactions="Ibuprofen increases bleeding risk.")
+    officer = SafetyOfficer(StubProvider("DECISION: VETO\nISSUES:\n- bleeding"), cache_dir=tmp_path)
+    verdict = officer.review(_case(), "Osteoarthritis", "Warfarin 5mg plus ibuprofen 400mg.", [])
+    assert [c["drug"] for c in verdict.tool_calls] == ["ibuprofen", "warfarin"]
+    assert all(c["tool"] == "openfda.drug_interactions" for c in verdict.tool_calls)
+
+
+def test_officer_passes_rule_hits_and_red_flags_into_its_prompt(tmp_path, offline):
+    provider = StubProvider("DECISION: VETO\nISSUES:\n- unsafe")
+    officer = SafetyOfficer(provider, cache_dir=tmp_path)
+    officer.review(_case(), "Musculoskeletal pain", "Reassure and discharge home.",
+                   [Message(role=Role.PATIENT, content="Crushing chest pain, sweating.", turn=0)])
+    sent = _sent(provider)
+    assert "cardiac chest pain" in sent and "red flags in the facts" in sent
+
+
+def test_officer_falls_back_to_the_rules_when_its_model_fails(tmp_path, offline):
+    officer = SafetyOfficer(FailingProvider(), cache_dir=tmp_path)
+    verdict = officer.review(_case(), "Osteoarthritis", "Warfarin 5mg plus ibuprofen 400mg.", [])
+    assert verdict.decision == SafetyDecision.VETO          # the rules still stand
+    assert any("warfarin + ibuprofen" in i for i in verdict.issues)
+
+
+def test_officer_config_error_aborts_the_run(tmp_path, offline):
+    with pytest.raises(ProviderConfigError):
+        SafetyOfficer(ConfigErrorProvider(), cache_dir=tmp_path).review(
+            _case(), "dx", "Paracetamol 1g QDS.", [])
+
+
+def test_unparseable_officer_reply_is_recorded_not_silently_approved(tmp_path, offline):
+    officer = SafetyOfficer(StubProvider("the plan seems ok to me"), cache_dir=tmp_path)
+    verdict = officer.review(_case(), "Tension headache", "Paracetamol 1g QDS.", [])
+    assert verdict.decision == SafetyDecision.APPROVE       # nothing to escalate from
+    assert any("no DECISION line" in i for i in verdict.issues)
+
+
+def test_officer_records_usage_for_cost_reporting(tmp_path, offline):
+    officer = SafetyOfficer(StubProvider("DECISION: APPROVE"), cache_dir=tmp_path)
+    officer.review(_case(), "dx", "Paracetamol 1g QDS.", [])
+    assert officer.last_usage.calls == 1
+
+
+def test_ablation_switches_turn_off_the_rule_layer(tmp_path, offline):
+    officer = SafetyOfficer(StubProvider("DECISION: APPROVE\nISSUES:\n- none"),
+                            use_rules=False, use_openfda=False, cache_dir=tmp_path)
+    verdict = officer.review(_case(), "Osteoarthritis",
+                             "Continue warfarin 5mg and add ibuprofen 400mg TDS.", [])
+    assert verdict.decision == SafetyDecision.APPROVE and verdict.tool_calls == []
+
+
+# --------------------------------------------------------------------------- #
+# SelfCheck (B3)
+# --------------------------------------------------------------------------- #
+def test_self_check_uses_the_doctor_provider_and_no_tools():
+    provider = StubProvider("DECISION: REVISE\nISSUES:\n- dose too high")
+    verdict = SelfCheck(provider).review(_case(), "dx", "Warfarin 50mg daily.", [])
+    assert verdict.decision == SafetyDecision.REVISE and verdict.reviewer == "self_check"
+    assert verdict.tool_calls == []                         # B3 has no tools
+    assert "Automated pre-checks" not in _sent(provider)    # and no rule pre-checks
+
+
+def test_self_check_has_no_rule_floor():
+    """B3 is the model's own judgement: an unsafe plan it approves stays approved."""
+    verdict = SelfCheck(StubProvider("DECISION: APPROVE\nISSUES:\n- none")).review(
+        _case(), "Osteoarthritis", "Continue warfarin 5mg and add ibuprofen 400mg TDS.", [])
+    assert verdict.decision == SafetyDecision.APPROVE
+
+
+# --------------------------------------------------------------------------- #
+# build_safety wiring
+# --------------------------------------------------------------------------- #
+def test_build_safety_none_returns_no_reviewer():
+    assert build_safety("none", {}) is None and build_safety(None, {}) is None
+
+
+def test_build_safety_builds_each_reviewer():
+    providers = {"doctor": StubProvider("x"), "safety_officer": StubProvider("y")}
+    assert isinstance(build_safety("self_check", providers), SelfCheck)
+    assert isinstance(build_safety("officer", providers), SafetyOfficer)
+
+
+def test_build_safety_self_check_uses_the_doctor_provider():
+    doctor = StubProvider("x")
+    assert build_safety("self_check", {"doctor": doctor}).provider is doctor
+
+
+def test_build_safety_officer_refuses_to_fall_back_to_the_doctor():
+    with pytest.raises(ValueError, match="safety_officer"):
+        build_safety("officer", {"doctor": StubProvider("x")})
+
+
+def test_build_safety_passes_ablation_kwargs_through():
+    providers = {"doctor": StubProvider("x"), "safety_officer": StubProvider("y")}
+    assert build_safety("officer", providers, facts_only=True).facts_only is True
+
+
+def test_build_safety_rejects_an_unknown_name():
+    with pytest.raises(ValueError, match="Unknown safety reviewer"):
+        build_safety("nonsense", {"doctor": StubProvider("x")})
+
+
+# --------------------------------------------------------------------------- #
+# End to end through EpisodeRunner
+# --------------------------------------------------------------------------- #
+def test_officer_veto_triggers_one_revision_end_to_end(tmp_path, offline):
+    from medsim.data import load_cases
+    from medsim.env import EpisodeRunner
+    from medsim.eval import Judge
+    from medsim.providers.mock import MockProvider
+
+    officer = SafetyOfficer(TwoReplyProvider(["DECISION: VETO\nISSUES:\n- unsafe discharge",
+                                              "DECISION: APPROVE\nISSUES:\n- none"]),
+                            cache_dir=tmp_path)
+    result = EpisodeRunner(MockProvider(role="doctor", diagnosis="Myasthenia gravis"),
+                           MockProvider(role="patient"), MockProvider(role="measurement"),
+                           Judge(method="exact"), safety=officer).run(load_cases(SMOKE)[0])
+    assert [v.decision for v in result.safety_verdicts] == [SafetyDecision.VETO,
+                                                            SafetyDecision.APPROVE]
+    assert result.plan is not None and result.final_plan is not None
+    assert "safety_officer" in result.usage        # cost is attributed to the reviewer
