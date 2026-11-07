@@ -1,0 +1,12 @@
+# G3 memory poisoning. features.memory is set per arm by the runner
+# (ungated vs gated), so the two arms differ only in the gate.
+# The `agents` block is injected by experiments/run_memory_poisoning.py from --providers.
+run_name: memory_poisoning
+dataset: data/processed/medqa_ext_test.jsonl   # the runner selects the 30 paired cases
+max_turns: 12          # Phase 1 averaged 6.5 turns; 12 holds cost near the 8K/case budget
+workers: 1             # REQUIRED: one memory is shared across a run, so order matters
+judge_method: llm
+features:
+  memory: ungated      # overridden per arm
+  memory_k: 3
+  cot: false           # the poisoning test isolates memory; CoT is varied in run_consultation
