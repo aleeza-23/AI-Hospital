@@ -39,6 +39,9 @@ class Role(str, Enum):
     PATIENT = "patient"
     MEASUREMENT = "measurement"
     SYSTEM = "system"
+    TRIAGE_NURSE = "triage_nurse"      # G1
+    SAFETY_OFFICER = "safety_officer"  # G2
+    TOOL = "tool"                      # deterministic tool output (vitals, openFDA, ...)
 
 
 class Message(BaseModel):
@@ -121,6 +124,22 @@ class EpisodeState(BaseModel):
         self.usage.setdefault(role, Usage()).add(usage)
 
 
+class SafetyDecision(str, Enum):
+    APPROVE = "approve"
+    REVISE = "revise"   # plan sent back to the doctor once with the issues
+    VETO = "veto"       # plan blocked and escalated (to a human in interactive mode)
+
+
+class SafetyVerdict(BaseModel):
+    """Output of a SafetyReviewer (G2) for one management plan."""
+
+    decision: SafetyDecision
+    issues: list[str] = Field(default_factory=list)
+    reviewer: str = ""          # "safety_officer" | "self_check"
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)  # e.g. openFDA lookups
+    raw: str = ""
+
+
 class JudgeVerdict(BaseModel):
     correct: bool
     method: str
@@ -142,6 +161,11 @@ class EpisodeResult(BaseModel):
     tests_requested: list[TestRequest]
     usage: dict[str, Usage]
     error: Optional[str] = None
+    # Phase 2 (filled only when the corresponding feature is on)
+    plan: Optional[str] = None                 # doctor's management plan (ask_plan)
+    final_plan: Optional[str] = None           # plan after safety review/revision (G2)
+    safety_verdicts: list[SafetyVerdict] = Field(default_factory=list)
+    memory_context: str = ""                   # retrieved past experience shown to the doctor (G3)
     finished_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
     )

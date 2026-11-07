@@ -7,6 +7,12 @@ State machine per turn (paper Fig. 2a, Conversation Phase):
                    ├─ REQUEST IMAGES  ─► image reader       ─► back to doctor
                    └─ question        ─► patient agent      ─► back to doctor
     turn == max_turns-1 ─► doctor is forced to diagnose; no diagnosis ─► timeout
+
+Phase 2 hooks (each off by default, switched by config `features`):
+    memory.context_for(case)  before the consultation  -> doctor prompt   (G3)
+    doctor.write_plan()       after the diagnosis       -> PLAN            (ask_plan)
+    safety.review(plan)       approve / revise / veto   -> one revision    (G2)
+    memory.add(case, result)  after judging             -> gated storage   (G3)
 """
 from __future__ import annotations
 
@@ -14,6 +20,7 @@ import logging
 from typing import Callable, Optional
 
 from medsim.agents import DoctorAgent, MeasurementAgent, PatientAgent
+from medsim.agents import prompts as P
 from medsim.contracts import (
     ActionType,
     Case,
@@ -21,8 +28,10 @@ from medsim.contracts import (
     EpisodeState,
     EpisodeStatus,
     Role,
+    SafetyDecision,
     TestRequest,
 )
+from medsim.safety.base import SafetyReviewer
 from medsim.eval.judge import Judge
 from medsim.memory.buffer import MemoryBuffer, NullMemory
 from medsim.providers.base import LLMProvider, ProviderConfigError
@@ -45,11 +54,17 @@ class EpisodeRunner:
         memory: Optional[MemoryBuffer] = None,
         max_turns: int = 20,
         on_message: Optional[OnMessage] = None,
+        safety: Optional[SafetyReviewer] = None,
+        ask_plan: bool = False,
+        cot: bool = False,
     ):
         self.doctor_llm, self.patient_llm, self.measurement_llm = doctor, patient, measurement
         self.judge = judge
         self.image_reader = image_reader or ImageReader(None)
-        self.memory = memory or NullMemory()  # Phase 2: experience replay
+        self.memory = memory or NullMemory()  # G3: experience replay (+ gate)
+        self.safety = safety                  # G2: plan review
+        self.ask_plan = ask_plan or safety is not None
+        self.cot = cot
         self.max_turns = max_turns
         self.on_message = on_message
 
@@ -60,12 +75,16 @@ class EpisodeRunner:
 
     def run(self, case: Case) -> EpisodeResult:
         state = EpisodeState(case_id=case.id, max_turns=self.max_turns)
-        doctor = DoctorAgent(self.doctor_llm, case)
+        memory_context = self.memory.context_for(case)
+        doctor = DoctorAgent(self.doctor_llm, case, memory_context=memory_context, cot=self.cot)
         patient = PatientAgent(self.patient_llm, case)
         measurement = MeasurementAgent(self.measurement_llm, case)
+        plan, final_plan, verdicts = None, None, []
 
         try:
             self._conversation(state, doctor, patient, measurement, case)
+            if self.ask_plan and state.final_diagnosis:
+                plan, final_plan, verdicts = self._plan_and_review(state, doctor, case)
         except ProviderConfigError:
             raise  # misconfiguration: abort the whole run instead of failing every case
         except Exception as exc:  # keep the batch alive; record the failure
@@ -90,9 +109,35 @@ class EpisodeRunner:
             tests_requested=state.tests_requested,
             usage=state.usage,
             error=state.error,
+            plan=plan,
+            final_plan=final_plan,
+            safety_verdicts=verdicts,
+            memory_context=memory_context,
         )
         self.memory.add(case, result)
         return result
+
+    def _plan_and_review(self, state: EpisodeState, doctor: DoctorAgent, case: Case):
+        plan = doctor.write_plan(state, state.final_diagnosis)
+        self._say(state, Role.DOCTOR, f"PLAN: {plan}")
+        final_plan, verdicts = plan, []
+        if self.safety is None:
+            return plan, final_plan, verdicts
+        verdict = self.safety.review(case, state.final_diagnosis, plan, state.transcript)
+        state.record_usage(self.safety.name, self.safety.last_usage)
+        verdicts.append(verdict)
+        self._say(state, Role.SAFETY_OFFICER, f"{verdict.decision.value.upper()}: {'; '.join(verdict.issues)}")
+        if verdict.decision != SafetyDecision.APPROVE:
+            feedback = P.DOCTOR_REVISE_PLAN.format(
+                decision="vetoed" if verdict.decision == SafetyDecision.VETO else "questioned",
+                issues="\n".join(f"- {i}" for i in verdict.issues) or "- unspecified")
+            final_plan = doctor.write_plan(state, state.final_diagnosis, feedback=feedback)
+            self._say(state, Role.DOCTOR, f"PLAN (revised): {final_plan}")
+            second = self.safety.review(case, state.final_diagnosis, final_plan, state.transcript)
+            state.record_usage(self.safety.name, self.safety.last_usage)
+            verdicts.append(second)
+            self._say(state, Role.SAFETY_OFFICER, f"{second.decision.value.upper()}: {'; '.join(second.issues)}")
+        return plan, final_plan, verdicts
 
     def _conversation(self, state, doctor, patient, measurement, case: Case) -> None:
         while state.turn < state.max_turns:

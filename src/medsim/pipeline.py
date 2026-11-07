@@ -16,6 +16,8 @@ from medsim.contracts import EpisodeResult, Role
 from medsim.data import load_cases
 from medsim.env import EpisodeRunner
 from medsim.eval import Judge, compute_metrics
+from medsim.memory import build_memory
+from medsim.safety import build_safety
 from medsim.providers import build_provider
 from medsim.tools import ImageReader
 
@@ -41,14 +43,24 @@ def build_runner(cfg: RunConfig, human_role: Optional[str] = None, verbose: bool
         Judge(method="exact") if cfg.judge_method == "exact" else Judge(provider("judge"), method="llm")
     )
     img_cfg = cfg.provider_cfg("image_reader")
+    f = cfg.features
+    doctor = provider("doctor")
+    # G2 reviewers get their own providers; self_check deliberately reuses the doctor model.
+    safety_providers = {"doctor": doctor}
+    if cfg.provider_cfg("safety_officer"):
+        safety_providers["safety_officer"] = provider("safety_officer")
     return EpisodeRunner(
-        doctor=provider("doctor"),
+        doctor=doctor,
         patient=provider("patient"),
         measurement=provider("measurement"),
         judge=judge,
         image_reader=ImageReader(build_provider(img_cfg, "image_reader") if img_cfg else None),
         max_turns=cfg.max_turns,
         on_message=print_message if (verbose or human_role) else None,
+        memory=build_memory(f.memory, k=f.memory_k),
+        safety=build_safety(f.safety, safety_providers),
+        ask_plan=f.ask_plan,
+        cot=f.cot,
     )
 
 

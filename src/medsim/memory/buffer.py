@@ -24,11 +24,28 @@ class MemoryRecord(BaseModel):
 
 
 class MemoryBuffer(ABC):
+    """Contract used by EpisodeRunner:
+
+    * context_for(case) is called BEFORE the consultation; its text is added to the
+      doctor's system prompt ("relevant past experience"). Only case.objective may
+      be used as the query (that is all the doctor knows up front).
+    * add(case, result) is called AFTER judging; result.verdict and
+      result.safety_verdicts are available, so a gate can decide what to store.
+    """
+
     @abstractmethod
     def add(self, case: Case, result: EpisodeResult) -> None: ...
 
     @abstractmethod
     def retrieve(self, query: str, k: int = 3) -> list[MemoryRecord]: ...
+
+    def context_for(self, case: Case, k: int = 3) -> str:
+        records = self.retrieve(case.objective, k)
+        if not records:
+            return ""
+        lines = [f"- Case: {r.summary} -> Diagnosis: {r.diagnosis}" + (f". Lesson: {r.insight}" if r.insight else "")
+                 for r in records]
+        return "\n".join(lines)
 
 
 class NullMemory(MemoryBuffer):

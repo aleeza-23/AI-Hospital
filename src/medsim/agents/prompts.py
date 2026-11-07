@@ -21,7 +21,25 @@ DOCTOR_FORCE_DIAGNOSIS = (
     '"DIAGNOSIS READY: [diagnosis]" and nothing else.'
 )
 
-PATIENT_SYSTEM = """You are a patient in a clinic who only responds in the form of dialogue. \
+# Phase 2 additions -------------------------------------------------------- #
+DOCTOR_MEMORY = """
+
+Relevant past experience from earlier patients (may or may not apply to this patient):
+{memory}"""
+
+DOCTOR_COT = """
+Before each action, reason step by step about the differential diagnosis and which question \
+or test best separates the remaining possibilities; then output only the single action."""
+
+DOCTOR_PLAN = """You have diagnosed: {diagnosis}.
+Now write the management plan for this patient: medications (name and dose), procedures, \
+and disposition (admit / discharge / refer). Reply in one line starting with "PLAN:"."""
+
+DOCTOR_REVISE_PLAN = """A safety reviewer {decision} your plan for these reasons:
+{issues}
+Write a corrected management plan in one line starting with "PLAN:"."""
+
+PATIENT_SYSTEM ="""You are a patient in a clinic who only responds in the form of dialogue. \
 You are being inspected by a doctor who will ask you questions and order exams to understand \
 your disease. Describe your symptoms in your own words, in 1-3 sentences. \
 Do NOT reveal the diagnosis or use medical jargon you would not know, and do not invent \

@@ -7,7 +7,7 @@ current request.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from medsim.agents import prompts as P
 from medsim.contracts import ActionType, Case, EpisodeState, Role, TestResult
@@ -51,15 +51,33 @@ class BaseAgent:
 class DoctorAgent(BaseAgent):
     role = Role.DOCTOR
 
+    def __init__(self, provider: LLMProvider, case: Case, memory_context: str = "", cot: bool = False):
+        super().__init__(provider, case)
+        self.memory_context, self.cot = memory_context, cot
+
     def system_prompt(self, state: EpisodeState, force_diagnosis: bool = False) -> str:
         # The turn counter lives in the system prompt, not the dialogue, so the
         # model does not learn to echo it in its replies.
         status = P.DOCTOR_FORCE_DIAGNOSIS if force_diagnosis else P.DOCTOR_TURN_NOTE.format(
             turn=state.turn, max_turns=state.max_turns
         )
-        return P.DOCTOR_SYSTEM.format(
+        prompt = P.DOCTOR_SYSTEM.format(
             max_turns=state.max_turns, tool_spec=TOOL_SPEC, objective=self.case.objective, status=status
         )
+        if self.cot:
+            prompt += P.DOCTOR_COT
+        if self.memory_context:
+            prompt += P.DOCTOR_MEMORY.format(memory=self.memory_context)
+        return prompt
+
+    def write_plan(self, state: EpisodeState, diagnosis: str, feedback: Optional[str] = None) -> str:
+        """Management plan after the diagnosis (G2 reviews it). `feedback` = reviewer issues."""
+        msgs = self.build_messages(state)
+        msgs.append({"role": "user", "content": P.DOCTOR_PLAN.format(diagnosis=diagnosis)})
+        if feedback:
+            msgs.append({"role": "user", "content": feedback})
+        text = self._call(msgs, state)
+        return text.split("PLAN:", 1)[-1].strip() if "PLAN:" in text else text.strip()
 
     def build_messages(self, state: EpisodeState, force_diagnosis: bool = False) -> list[ChatMessage]:
         msgs: list[ChatMessage] = [{"role": "system", "content": self.system_prompt(state, force_diagnosis)}]
