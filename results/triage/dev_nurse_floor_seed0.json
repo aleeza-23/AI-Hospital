@@ -1,0 +1,23 @@
+{
+  "n": 25,
+  "n_high_acuity": 10,
+  "accuracy": 0.56,
+  "qwk": 0.8041,
+  "under_triage": 0.16,
+  "over_triage": 0.28,
+  "under_triage_high_acuity": 0.0,
+  "within_one_level": 0.96,
+  "method": "nurse_floor",
+  "seed": 0,
+  "split": "dev",
+  "failures": 0,
+  "avg_actions": 2.88,
+  "vitals_used_rate": 0.96,
+  "tokens_per_case": 1769.7,
+  "latency_s_per_case": 3.19,
+  "ward_mean_wait_all_min": 14.98,
+  "ward_mean_wait_high_acuity_min": 7.542,
+  "ward_max_wait_high_acuity_min": 21.15,
+  "ward_target_violation_rate": 0.224,
+  "ward_target_violation_rate_high_acuity": 0.46
+}

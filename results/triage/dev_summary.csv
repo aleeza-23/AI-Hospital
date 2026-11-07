@@ -1,0 +1,6 @@
+method,runs,n,accuracy_mean,accuracy_std,qwk_mean,qwk_std,under_triage_mean,under_triage_std,under_triage_high_acuity_mean,under_triage_high_acuity_std,over_triage_mean,over_triage_std,failures_mean,failures_std,tokens_per_case_mean,tokens_per_case_std,calls_per_case_mean,calls_per_case_std,latency_s_per_case_mean,latency_s_per_case_std,ward_mean_wait_high_acuity_min_mean,ward_mean_wait_high_acuity_min_std,ward_target_violation_rate_high_acuity_mean,ward_target_violation_rate_high_acuity_std
+human,1,25,0.8,0.0,0.9451,0.0,0.08,0.0,0.2,0.0,0.12,0.0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,7.098,0.0,0.44,0.0
+nurse_floor,1,25,0.56,0.0,0.8041,0.0,0.16,0.0,0.0,0.0,0.28,0.0,0,0.0,1769.7,0.0,0,0.0,3.19,0.0,7.542,0.0,0.46,0.0
+nurse,1,25,0.48,0.0,0.7273,0.0,0.32,0.0,0.3,0.0,0.2,0.0,0,0.0,1911.8,0.0,0,0.0,3.24,0.0,8.184,0.0,0.46,0.0
+rules,1,25,0.52,0.0,0.8113,0.0,0.2,0.0,0.0,0.0,0.28,0.0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,7.118,0.0,0.42,0.0
+single_llm,1,25,0.52,0.0,0.7629,0.0,0.2,0.0,0.1,0.0,0.28,0.0,0,0.0,504.9,0.0,0,0.0,0.95,0.0,7.646,0.0,0.44,0.0
