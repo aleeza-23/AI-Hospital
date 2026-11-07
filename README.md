@@ -6,8 +6,11 @@ almost no information. Based on *Self-Evolving Multi-Agent Simulations for Reali
 Interactions* (MedAgentSim, arXiv:2503.22678).
 
 **Phase 1 status:** baseline **Multi-Agent Clinic** implemented end to end (data → agents →
-tools → judge → metrics). Memory / reflection / CoT / ensembling (Phase 2) have defined interfaces.
-See [docs/architecture.md](docs/architecture.md).
+tools → judge → metrics). See [docs/architecture.md](docs/architecture.md).
+
+**Phase 2 status:** all three SafeWard gaps are implemented and switchable from config
+(`features: {memory, safety, cot, ask_plan}`) — G1 triage, G2 safety review, G3 verified
+memory. See [Phase 2](#phase-2-safeward) below.
 
 ## Quick start
 
@@ -83,11 +86,52 @@ src/medsim/
   tools/            doctor action parser, image reader (VLM)
   env/              EpisodeRunner (conversation state machine)
   eval/             LLM judge, metrics (Wilson CI)
-  memory/           MemoryBuffer interface (Phase 2)
+  triage/           G1: triage nurse, KTAS rules, ward queue
+  safety/           G2: Safety Officer, red-flag rules, openFDA tool, unsafe-action grader
+  memory/           G3: ungated / gated memory, TF-IDF kNN retrieval
   data/             dataset converters / loaders
   pipeline.py       config -> run -> episodes.jsonl + metrics.json
+experiments/        Phase 2 experiment runners + configs
 tests/              pytest suite (runs offline with mock provider)
 ```
+
+## Phase 2: SafeWard
+
+Three gaps are added on top of the baseline consultation loop, each switchable from config so
+every configuration is an ablation of the same system.
+
+| Gap | What it adds | Config |
+|---|---|---|
+| G1 Triage | Triage Nurse agent (KTAS 1-5) + acuity-ordered ward queue | `experiments/run_triage.py` |
+| G2 Safety | independent Safety Officer reviewing every management plan, with red-flag rules and an openFDA drug-label tool | `features: {safety: officer, ask_plan: true}` |
+| G3 Verified memory | memory gate: a lesson is stored only if the outcome is confirmed and no safety verdict was a VETO | `features: {memory: gated, cot: true}` |
+
+```bash
+python experiments/run_triage.py --split test --methods all          # G1
+python experiments/run_safety.py --split test --configs all          # G2: B2 / B3 / SafeWard
+python experiments/run_memory_poisoning.py                           # G3: poisoning test
+python experiments/run_consultation.py --configs all --n 40          # E1 / E2 / E3
+```
+
+Every runner takes `--mock`, which exercises the whole pipeline offline with no API key, and
+`--resume`, which skips cases already written to the log (free-tier daily token limits stop long
+runs part way). Results land in `results/<area>/` and full trajectories in `logs/<area>/`.
+
+**Substitutions from the base paper**, both recorded with their reasons in
+[docs/devlog_G2.md](docs/devlog_G2.md) and [docs/devlog_G3.md](docs/devlog_G3.md):
+
+- Memory retrieval uses **TF-IDF cosine similarity** (`src/medsim/memory/embed.py`) in place of
+  MedAgentSim's CLIP embeddings. The cases here are text-only and no GPU is available, so an
+  image-text embedding model would add a dependency and a download without changing what is
+  retrieved. Weighting follows scikit-learn's defaults (sublinear term frequency, smoothed inverse
+  document frequency, L2-normalised vectors), so the numbers stay comparable with a scikit-learn
+  implementation.
+- MedAgentSim's **multi-doctor majority-vote ensembling is not implemented**, for cost. E2 is
+  therefore a partial reproduction: memory + chain-of-thought only.
+
+The openFDA drug-label cache in `data/cache/openfda/` is committed (97 entries), so safety runs
+are repeatable offline. `OPENFDA_OFFLINE=1` forbids network access outright, which is how the test
+suite runs; refresh or extend it with `python -m medsim.safety.openfda`.
 
 ## Disclaimer
 
