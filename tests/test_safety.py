@@ -214,6 +214,69 @@ def test_dose_rules_ignore_drugs_with_a_wide_margin():
 
 
 # --------------------------------------------------------------------------- #
+# A plan that withdraws a drug is not a plan that gives it
+# --------------------------------------------------------------------------- #
+def test_prescribed_drugs_excludes_a_drug_the_plan_stops():
+    assert R.prescribed_drugs("Stop ramipril, start labetalol 100mg BD.") == ["labetalol"]
+    assert "warfarin" not in R.prescribed_drugs("Switch from warfarin to heparin.")
+    assert R.extract_drugs("Stop ramipril.") == ["ramipril"]      # raw extraction is unchanged
+
+
+def test_the_correct_plan_for_an_ace_inhibitor_in_pregnancy_is_not_flagged():
+    """"Stop ramipril, start labetalol" is the right answer and must not veto."""
+    assert R.check_plan("Stop ramipril, start labetalol 100mg BD.", "24 weeks gestation.") == []
+
+
+def test_declining_an_nsaid_in_renal_failure_is_not_flagged():
+    assert R.check_plan("Avoid ibuprofen given the CKD; give prednisolone 30mg.",
+                        "CKD stage 4.") == []
+
+
+def test_holding_a_statin_for_a_macrolide_course_is_not_flagged():
+    assert R.check_plan("Hold the simvastatin and give clarithromycin for 5 days.",
+                        "Community-acquired pneumonia.") == []
+
+
+def test_continuing_the_same_drug_is_still_flagged():
+    hits = R.check_plan("Continue ramipril 5mg daily.", "24 weeks gestation.")
+    assert any("pregnancy" in h.code for h in hits)
+
+
+def test_stopping_a_critical_drug_is_still_caught_despite_the_negation_window():
+    """The dose rules read raw mentions, because stopping IS the unsafe act there."""
+    hits = R.check_plan("Agree to stop insulin as the patient asked.")
+    assert any(h.code == "dose:stop_insulin" for h in hits)
+
+
+# --------------------------------------------------------------------------- #
+# Drug-class coverage
+# --------------------------------------------------------------------------- #
+def test_every_penicillin_is_contraindicated_in_penicillin_allergy():
+    for drug in ("amoxicillin", "flucloxacillin", "benzylpenicillin", "ampicillin"):
+        hits = R.check_plan(f"Start {drug} 500mg QDS for the cellulitis.",
+                            "Documented penicillin allergy with angioedema.")
+        assert any("penicillin_allergy" in h.code for h in hits), drug
+        assert R.worst(hits) == SafetyDecision.VETO
+
+
+def test_a_non_beta_lactam_alternative_is_safe_in_penicillin_allergy():
+    assert R.check_plan("Start clindamycin 300mg QDS.", "Documented penicillin allergy.") == []
+
+
+def test_a_z_drug_with_an_opioid_is_a_veto_like_a_benzodiazepine():
+    hits = R.check_plan("Oxycodone 10mg QDS plus zopiclone 7.5mg at night.")
+    assert any(h.code == "interaction:oxycodone+zopiclone" for h in hits)
+    assert R.worst(hits) == SafetyDecision.VETO
+
+
+def test_the_scenarios_safe_alternatives_are_in_the_vocabulary():
+    """So the officer can look them up on openFDA rather than seeing nothing."""
+    for drug in ("nitrofurantoin", "flucloxacillin", "labetalol", "nifedipine",
+                 "methyldopa", "colchicine", "salbutamol", "clindamycin"):
+        assert drug in R.DRUG_ALIASES, drug
+
+
+# --------------------------------------------------------------------------- #
 # Aggregation
 # --------------------------------------------------------------------------- #
 def test_a_safe_plan_produces_no_hits_and_approves():

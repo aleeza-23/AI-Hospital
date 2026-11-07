@@ -92,6 +92,32 @@ def build_config(name: str, dataset: Path, providers: Path, num_cases: Optional[
     return RunConfig.model_validate(raw)
 
 
+ABLATIONS: dict[str, dict[str, Any]] = {
+    # name -> SafetyOfficer kwargs. "none" is SafeWard as specified.
+    "none": {},
+    "facts_only": {"facts_only": True},    # proposal ablation 4: no doctor turns
+    "no_rules": {"use_rules": False},      # the model alone, no deterministic floor
+    "no_openfda": {"use_openfda": False},  # rules + model, no drug-label evidence
+    "model_only": {"use_rules": False, "use_openfda": False},
+}
+
+
+def apply_ablation(runner, cfg: RunConfig, name: str, mock: bool) -> None:
+    """Swap in a differently configured officer.
+
+    pipeline.build_runner takes no reviewer kwargs, so the officer is rebuilt here
+    rather than changing shared code.
+    """
+    if name == "none" or cfg.features.safety != "officer":
+        return
+    from medsim.providers import build_provider
+    from medsim.safety.officer import SafetyOfficer
+
+    provider = MockReviewer() if mock else build_provider(
+        cfg.agents["safety_officer"], "safety_officer")
+    runner.safety = SafetyOfficer(provider, **ABLATIONS[name])
+
+
 def make_runner(cfg: RunConfig, mock: bool):
     if not mock:
         return build_runner(cfg)
@@ -297,6 +323,8 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="cap the adversarial cases (smoke runs)")
     ap.add_argument("--skip-normal", action="store_true")
     ap.add_argument("--resume", action="store_true", help="skip cases already in the log files")
+    ap.add_argument("--ablation", choices=sorted(ABLATIONS), default="none",
+                    help="reconfigure the Safety Officer; only affects safety=officer")
     ap.add_argument("--mock", action="store_true", help="offline wiring check, no API key")
     args = ap.parse_args()
     load_env()
@@ -319,14 +347,16 @@ def main() -> None:
     for name in configs:
         for seed in range(args.seeds):
             cfg = build_config(name, adv_path, ROOT / args.providers, args.limit, args.mock)
-            tag = f"{cfg.run_name}_{args.split}_seed{seed}"
-            print(f"-- {tag}  (safety={cfg.features.safety})")
+            suffix = "" if args.ablation == "none" else f"_{args.ablation}"
+            tag = f"{cfg.run_name}{suffix}_{args.split}_seed{seed}"
+            print(f"-- {tag}  (safety={cfg.features.safety}, ablation={args.ablation})")
             runner = make_runner(cfg, args.mock)
+            apply_ablation(runner, cfg, args.ablation, args.mock)
             adv_results = run_set(runner, adv_cases,
-                                  LOG_DIR / f"{cfg.run_name}_adversarial_{args.split}_seed{seed}.jsonl",
+                                  LOG_DIR / f"{cfg.run_name}{suffix}_adversarial_{args.split}_seed{seed}.jsonl",
                                   args.resume, "adversarial")
             norm_results = run_set(runner, normal_cases,
-                                   LOG_DIR / f"{cfg.run_name}_normal_seed{seed}.jsonl",
+                                   LOG_DIR / f"{cfg.run_name}{suffix}_normal_seed{seed}.jsonl",
                                    args.resume, "normal") if normal_cases else []
 
             # The grader judge reuses this run's judge provider, so no extra model is
@@ -337,7 +367,7 @@ def main() -> None:
 
             metrics: dict[str, Any] = {"config": cfg.run_name, "seed": seed, "split": args.split,
                                        "safety": cfg.features.safety, "max_turns": cfg.max_turns,
-                                       "mock": args.mock}
+                                       "ablation": args.ablation, "mock": args.mock}
             metrics.update(adversarial_metrics(grades, adv_results))
             metrics.update(normal_metrics(norm_results))
             metrics.update(cost_block(adv_results + norm_results,
@@ -346,7 +376,7 @@ def main() -> None:
             metrics["grader_judge_tokens"] = (grader.usage.prompt_tokens
                                               + grader.usage.completion_tokens)
             (RES_DIR / f"{tag}.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-            with open(LOG_DIR / f"{cfg.run_name}_grades_{args.split}_seed{seed}.jsonl", "w",
+            with open(LOG_DIR / f"{cfg.run_name}{suffix}_grades_{args.split}_seed{seed}.jsonl", "w",
                       encoding="utf-8") as f:
                 for g in grades:
                     f.write(g.model_dump_json() + "\n")

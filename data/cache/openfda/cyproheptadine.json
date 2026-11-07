@@ -1,0 +1,10 @@
+{
+  "drug": "cyproheptadine",
+  "status": "ok",
+  "drug_interactions": "",
+  "contraindications": "CONTRAINDICATIONS Newborn or Premature Infants: This drug should not be used in newborn or premature infants. Nursing Mothers: Because of the higher risk of antihistamines for infants generally, and for newborns and prematures in particular, antihistamine therapy is contraindicated in nursing mothers. Other Conditions: Hypersensitivity to cyproheptadine and other drugs of similar chemical structure. Monoamine oxidase inhibitor therapy (see DRUG INTERACTIONS ). Angle-closure glaucoma. Stenosing peptic ulcer. Symptomatic prostatic hypertrophy. Bladder neck obstruction. Pyloroduodenal obstruction, elderly, debilitated patients.",
+  "warnings": "WARNINGS Children - Overdosage of antihistamines, particularly in infants and children, may produce hallucinations, central nervous system depression, convulsions, and death. Antihistamines may diminish mental alertness conversely particularly in the young child they may occasionally produce excitation. CNS Depressants - Antihistamines may have additive effects with alcohol and other CNS depressants, e.g., hypnotics, sedatives, tranquilizers, antianxiety agents. Activities Requiring Mental Alertness - Patients should be warned about engaging in activities requiring mental alertness and motor coordination, such as driving a car or operating machinery. Antihistamines are more likely to cause dizziness, sedation and hypotension in elderly patients.",
+  "source_url": "https://api.fda.gov/drug/label.json?search=openfda.generic_name%3A%22cyproheptadine%22&limit=1",
+  "fetched_at": "2026-11-07T19:38:00+00:00",
+  "detail": ""
+}

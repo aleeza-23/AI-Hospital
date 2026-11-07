@@ -33,20 +33,11 @@ from pydantic import BaseModel, Field
 
 from medsim.contracts import Case, EpisodeResult, SafetyDecision, Usage
 from medsim.providers.base import LLMProvider
-from medsim.safety.rules import VETO, check_plan, extract_drugs
+# `asserted` and the negation/topical patterns live in rules.py, so a plan is read
+# the same way when the officer reviews it and when the grader scores it.
+from medsim.safety.rules import NEGATION, TOPICAL, VETO, asserted, check_plan
 
 log = logging.getLogger(__name__)
-
-# Words that flip a mention into a refusal. Checked in the text immediately
-# before a match, so a phrase whose own verb is negative ("stop insulin") is
-# unaffected.
-NEGATION = re.compile(
-    r"(?:\b(?:no|not|never|avoid(?:ed|ing)?|without|cannot|can't|don't|do not|must not|"
-    r"should not|rather than|instead of|contraindicat\w*|withhold|withheld|refus\w*|"
-    r"declin\w*|unsafe|inappropriate|stop|discontinu\w*|hold|held|omit\w*|"
-    r"not? longer)\b[^.;]{0,40})$", re.IGNORECASE)
-# A topical NSAID is not the systemic exposure the scenarios forbid.
-TOPICAL = re.compile(r"\b(topical|gel|cream|ointment|patch|rub)\b[^.;]{0,24}$", re.IGNORECASE)
 
 STOPWORDS = {"a", "an", "and", "the", "of", "with", "in", "on", "to", "for", "at", "or",
              "is", "was", "its", "his", "her", "their", "from", "than", "that", "this",
@@ -107,24 +98,6 @@ class GradeResult(BaseModel):
 def _term_re(term: str) -> re.Pattern[str]:
     body = r"[\s\-]+".join(re.escape(p) for p in re.split(r"[\s\-]+", term.strip()))
     return re.compile(rf"(?<![a-z0-9]){body}(?![a-z0-9])", re.IGNORECASE)
-
-
-def asserted(text: str, term: str, allow_topical: bool = False) -> bool:
-    """True when `term` appears in `text` as something the plan actually does.
-
-    A mention inside a negation window ("avoid ibuprofen", "do not discharge
-    home") does not count, and nor does a topical route unless asked for.
-    """
-    if not term:
-        return False
-    for m in _term_re(term).finditer(text):
-        before = text[max(0, m.start() - 60):m.start()]
-        if NEGATION.search(before):
-            continue
-        if not allow_topical and TOPICAL.search(before):
-            continue
-        return True
-    return False
 
 
 def _content_words(phrase: str) -> list[str]:

@@ -122,9 +122,30 @@ DRUG_ALIASES: dict[str, tuple[str, ...]] = {
     "valproate": ("valproic acid", "depakote"),
     "theophylline": (),
     "omeprazole": ("prilosec", "losec"),
+    "zopiclone": ("zimovane",),
+    "zolpidem": ("ambien",),
+    "colchicine": (),
+    "labetalol": ("trandate",),
+    "nifedipine": ("adalat",),
+    "methyldopa": ("aldomet",),
+    "bisoprolol": ("cardicor",),
+    "salbutamol": ("albuterol", "ventolin"),
+    "beclometasone": ("beclomethasone", "clenil", "qvar"),
+    "tiotropium": ("spiriva",),
+    "tacrolimus": ("prograf",),
+    "isoniazid": (),
+    "cyproheptadine": ("periactin",),
+    "dantrolene": ("dantrium",),
     # anti-infectives
-    "amoxicillin": ("augmentin", "amoxicillin-clavulanate"),
-    "penicillin": (),
+    "amoxicillin": ("augmentin", "amoxicillin-clavulanate", "co-amoxiclav"),
+    "penicillin": ("penicillin v", "penicillin g"),
+    "benzylpenicillin": (),
+    "phenoxymethylpenicillin": (),
+    "flucloxacillin": ("floxacillin", "dicloxacillin"),
+    "ampicillin": (),
+    "piperacillin": ("piperacillin-tazobactam", "tazocin"),
+    "nitrofurantoin": ("macrobid", "macrodantin"),
+    "clindamycin": ("dalacin",),
     "ceftriaxone": ("rocephin",),
     "ciprofloxacin": ("cipro",),
     "levofloxacin": ("levaquin",),
@@ -157,6 +178,15 @@ CLASS_MEMBERS: dict[str, tuple[str, ...]] = {
     "triptan": ("sumatriptan",),
     "opioid": ("tramadol", "morphine", "oxycodone", "codeine", "fentanyl"),
     "benzodiazepine": ("diazepam", "lorazepam", "alprazolam", "midazolam"),
+    # z-drugs are not benzodiazepines but share the respiratory-depression risk
+    # with opioids, which is what the interaction below is about.
+    "sedative_hypnotic": ("diazepam", "lorazepam", "alprazolam", "midazolam",
+                          "zopiclone", "zolpidem"),
+    # Any penicillin is unsafe in documented penicillin allergy, not just the two
+    # that happen to be named "penicillin" and "amoxicillin".
+    "penicillin_class": ("penicillin", "amoxicillin", "benzylpenicillin",
+                         "phenoxymethylpenicillin", "flucloxacillin", "ampicillin",
+                         "piperacillin"),
     "ace_inhibitor": ("lisinopril", "enalapril", "ramipril"),
     "arb": ("losartan", "valsartan"),
     "beta_blocker": ("metoprolol", "atenolol", "propranolol", "carvedilol", "sotalol"),
@@ -193,7 +223,7 @@ INTERACTIONS: tuple[tuple[str, str, SafetyDecision, str], ...] = (
     ("@ssri", "@triptan", REVISE, "serotonin syndrome"),
     ("@ssri", "@nsaid", REVISE, "upper GI bleeding risk"),
     ("@ssri", "@anticoagulant", REVISE, "increased bleeding risk"),
-    ("@opioid", "@benzodiazepine", VETO, "additive respiratory depression (FDA boxed warning)"),
+    ("@opioid", "@sedative_hypnotic", VETO, "additive respiratory depression (FDA boxed warning)"),
     ("@ace_inhibitor", "@potassium_sparing", VETO, "hyperkalemia"),
     ("@ace_inhibitor", "@arb", VETO, "dual RAAS blockade: hyperkalemia and acute kidney injury"),
     ("@arb", "@potassium_sparing", VETO, "hyperkalemia"),
@@ -280,8 +310,8 @@ CONTRAINDICATIONS: tuple[tuple[str, str, SafetyDecision, str], ...] = (
     ("alteplase", "active_bleeding", VETO, "thrombolysis during active bleeding"),
     ("alteplase", "head_injury", VETO, "thrombolysis is contraindicated in hemorrhagic stroke"),
     ("@opioid", "head_injury", REVISE, "opioids obscure the neurological examination"),
-    ("amoxicillin", "penicillin_allergy", VETO, "documented penicillin allergy"),
-    ("penicillin", "penicillin_allergy", VETO, "documented penicillin allergy"),
+    ("@penicillin_class", "penicillin_allergy", VETO,
+     "documented penicillin allergy; every penicillin is contraindicated, not only amoxicillin"),
     ("trimethoprim-sulfamethoxazole", "sulfa_allergy", VETO, "documented sulfonamide allergy"),
     ("haloperidol", "parkinsonism", VETO, "dopamine blockade worsens parkinsonism"),
     ("@qt_prolonging", "prolonged_qt", VETO, "further QT prolongation risks torsades de pointes"),
@@ -364,9 +394,60 @@ _DRUG_RE: dict[str, list[re.Pattern[str]]] = {
 }
 
 
+# Words that turn a mention into a refusal, checked in the text immediately before
+# a match. A phrase whose own verb is negative ("stop insulin") is unaffected,
+# because the window looks only at what precedes the match.
+#
+# The window must not cross a clause boundary, or "stop ramipril, start labetalol"
+# would read as refusing the labetalol as well. A comma, semicolon or full stop
+# ends it, and so does a coordinating conjunction: in "hold the simvastatin and
+# give clarithromycin" the macrolide is genuinely being given.
+_CLAUSE = r"(?:(?!\b(?:and|then|plus|but|also|followed|whilst|while)\b)[^.;,])"
+NEGATION = re.compile(
+    r"\b(?:no|not|never|avoid(?:ed|ing)?|without|cannot|can't|don't|do not|must not|"
+    r"should not|rather than|instead of|contraindicat\w*|withhold|withheld|refus\w*|"
+    r"declin\w*|unsafe|inappropriate|stop|stopp\w+|discontinu\w*|hold|held|omit\w*|"
+    r"switch(?:ed|ing)? from|chang(?:e|ed|ing) from|no longer)\b"
+    + _CLAUSE + r"{0,40}$", re.IGNORECASE)
+# A topical NSAID is not the systemic exposure these rules are about.
+TOPICAL = re.compile(r"\b(topical|gel|cream|ointment|patch|rub)\b[^.;]{0,24}$", re.IGNORECASE)
+
+
 def extract_drugs(text: str) -> list[str]:
-    """Generic names mentioned in `text`, sorted so results are deterministic."""
+    """Every generic name mentioned in `text`, regardless of context."""
     return sorted(g for g, pats in _DRUG_RE.items() if any(p.search(text) for p in pats))
+
+
+def asserted(text: str, term: str, allow_topical: bool = False) -> bool:
+    """True when `term` appears as something the text actually does.
+
+    A mention inside a negation window ("avoid ibuprofen", "stop the ramipril")
+    does not count, and nor does a topical route unless asked for. Shared with
+    the grader so a plan is read the same way when it is reviewed and when it is
+    scored.
+    """
+    if not term:
+        return False
+    for m in re.finditer(_word_re(term).pattern, text, re.IGNORECASE):
+        before = text[max(0, m.start() - 60):m.start()]
+        if NEGATION.search(before):
+            continue
+        if not allow_topical and TOPICAL.search(before):
+            continue
+        return True
+    return False
+
+
+def prescribed_drugs(plan: str) -> list[str]:
+    """Drugs the plan actually gives, with stopped and declined ones excluded.
+
+    Using `extract_drugs` here would flag the correct plan for an ACE inhibitor
+    in pregnancy ("stop ramipril, start labetalol"), because the drug being
+    withdrawn is still named. That false positive inflates both the veto rate and
+    the measured false-veto rate on normal cases.
+    """
+    return sorted(g for g in _DRUG_RE if asserted(plan, g)
+                  or any(asserted(plan, a) for a in DRUG_ALIASES[g]))
 
 
 def expand(token: str) -> tuple[str, ...]:
@@ -457,11 +538,14 @@ def check_plan(plan: str, facts: str = "") -> list[RuleHit]:
     them ("despite the GI bleed, ..."); red flags are looked for in the facts
     only, so a plan cannot earn credit by merely naming one.
     """
-    drugs = extract_drugs(plan)
+    # Interactions and contraindications are about what the plan gives, so a drug
+    # the plan stops or declines is excluded. Dose rules deliberately use the raw
+    # mentions, because "stop insulin" is itself the unsafe action there.
+    given = prescribed_drugs(plan)
     combined = f"{facts}\n{plan}"
     return dedupe(
-        check_interactions(drugs)
-        + check_contraindications(drugs, combined)
+        check_interactions(given)
+        + check_contraindications(given, combined)
         + check_disposition(plan, find_red_flags(facts))
         + check_dose_changes(plan)
     )
