@@ -73,10 +73,36 @@ stated in the paper rather than left as a missing promise.
 | LangGraph orchestration, Streamlit dashboard, human override | **not built** | Out of scope for this brief; the repo uses a plain Python state machine. |
 | Proposal ablation 4: officer sees reasoning vs plan only | **runnable, not run** | `python experiments/run_safety.py --ablation facts_only`. Also `no_rules`, `no_openfda` and `model_only`, which measure what each layer of the officer contributes. None has been run, for want of an API key. |
 
+## Peer review of the scenario set
+
+**Completed 2026-11-08.** Reviewers: **Hudiya e Zehra** and **Aleeza Azhar** (two group members,
+per the brief). Each of the 40 scenarios was reviewed against the five-point rubric stored in
+`metadata.review_rubric`, presented as plain-language Pass/Fail checks over the objective, patient
+info, hidden exam/test findings and scoring criteria. This is a construct-validity and internal-
+consistency review by non-clinicians; the clinical claims rest on the bright-line safety rules each
+case is built on. `metadata.reviewed_by` now records both names and `review_status` is `"accepted"`
+on all 40, consistently across `adversarial.jsonl`, `adversarial_dev.jsonl` and
+`adversarial_test.jsonl`.
+
+**Outcome:** 36 accepted as written; 4 accepted after an agreed fix (all were check-(b) issues — a
+listed unsafe action or drug that did not match the scoring criteria):
+
+| Scenario | Split | Fix applied |
+|---|---|---|
+| adv-0029 | test | Criteria now explain why full-dose colchicine is unsafe at eGFR 22 (renal accumulation, marrow suppression, neuromyopathy), matching the second unsafe action. |
+| adv-0036 | test | Removed the "ACE inhibitor / thiazide with lithium" unsafe action, which the criteria never covered and a back-pain visit does not invite; the NSAID+lithium trap is unchanged. |
+| adv-0038 | test | Added `febuxostat` to `unsafe_drugs` and the criteria (it blocks xanthine oxidase like allopurinol), matching the existing unsafe action. |
+| adv-0039 | **dev** | Removed `levofloxacin` from `unsafe_drugs`: it is a weak CYP1A2 inhibitor, inconsistent with the criteria's "strong CYP1A2 inhibitor". |
+
+**Caveat — adv-0039 was in the Step 1 dev run.** Its content changed after that run, so the dev
+numbers for adv-0039 predate the edit. The change only drops one drug from `unsafe_drugs`, which can
+lower a counted unsafe action but never add one, so the reported dev `unsafe_action_rate` is an
+upper bound for the edited set. To refresh it, `--resume` is not enough (it skips cases already
+logged as complete): delete adv-0039's lines from `logs/safety/safety_*_adversarial_dev_seed0.jsonl`
+and re-run the dev split. The three test-split fixes were not yet run, so they need no re-run.
+
+(Review process and the fill-in doc generated for the reviewers: `docs/scenario_review.md`.)
+
 ## Not done
 
-- **Peer review of the scenario set.** `metadata.reviewed_by` is empty and `review_status` is
-  `"pending"` for all 40 scenarios. The brief requires two group members to review each one; that
-  has not happened, and the names must not be recorded until it does. The agreed rubric is stored
-  in `metadata.review_rubric` so the review can be carried out against it.
 - **Every experiment in the brief's step 6.** No run has been executed against a real model.
