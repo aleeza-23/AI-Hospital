@@ -1,0 +1,427 @@
+% SafeWard, AI4015 Phase 2 paper (IEEEtran, two-column, 8-10 pages incl. references).
+% Upload this folder to Overleaf (New Project -> Upload Project -> zip of paper/).
+%
+% STATUS
+% - Sections 1-7 contain a DRAFT prepared with AI assistance under the instructor's written
+%   permission. The group must read, correct and revise every paragraph, and check every claim
+%   against the repository before submission.
+% - \tbd{...} marks numbers or facts that must be filled from results/ once experiments finish.
+% - Sections 8-12 still hold CHECKLIST comments; they are drafted after results exist.
+% - Every number must come from results/ (brief Sec. 5). Tables marked AUTO are \input from
+%   results/tables/ and must not be retyped.
+
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\tbd}[1]{\textcolor{red}{[TBD: #1]}}
+
+\begin{document}
+
+\title{SafeWard: A Triage-Aware, Safety-Guarded Multi-Agent Hospital Simulation for Clinical Reasoning}
+
+\author{
+\IEEEauthorblockN{Hudiya e Zehra}
+\IEEEauthorblockA{23I-0761\\ \textit{i230761@isb.nu.edu.pk}}
+\and
+\IEEEauthorblockN{Aleeza Azhar}
+\IEEEauthorblockA{23I-0765\\ \textit{i230765@isb.nu.edu.pk}}
+\and
+\IEEEauthorblockN{Abdul Ghufran}
+\IEEEauthorblockA{23I-0576\\ \textit{i230576@isb.nu.edu.pk}}
+\\
+\IEEEauthorblockA{Project G2-04, AI4015 Agentic Artificial Intelligence, FAST-NUCES Islamabad}
+}
+
+\maketitle
+
+% =====================================================================
+\begin{abstract}
+% Drafted last, once the gap-resolution table is final (150-250 words): problem, approach,
+% data, one headline number per gap, contribution.
+\tbd{abstract}
+\end{abstract}
+
+\begin{IEEEkeywords}
+multi-agent systems, large language models, clinical decision support, emergency triage, AI safety, agent memory
+\end{IEEEkeywords}
+
+% =====================================================================
+\section{Introduction}
+
+Large language models (LLMs) now get to expert-level scores on static medical question-answering
+benchmarks such as MedQA~\cite{jin2021medqa,singhal2023medpalm,nori2023medprompt}. In these
+benchmarks the model get the complete case at once. Clinical work is unlike: information
+is incomplete at first and is acquired through questions, examinations and tests. Interactive
+simulators address this mismatch by letting a doctor agent consult a simulated patient over
+several turns~\cite{schmidgall2024agentclinic,fan2025aihospital,tu2025amie}. MedAgentSim~\cite{almansoori2025medagentsim},
+our base paper, extends this line with a measurement agent that returns test results only on
+request and with a self-improving memory of earlier cases. With LLaMA~3.3~70B it reports a
+diagnostic accuracy on MedQA that rises from 54.7\% for its multi-agent baseline to 70.8\% for
+the full system.
+
+These simulators share an implicit assumption: every patient walks directly into a one-to-one
+consultation, and the only outcome that matters is the final diagnosis. Emergency care starts
+earlier and fails in other ways. Patients are first triaged by urgency and queued, and two of
+the most harmful errors occur outside the diagnosis itself. \emph{Under-triage} assigns a
+critically ill patient a less urgent level, delaying care; recent studies report that LLMs tend
+to under-triage high-acuity cases~\cite{npjai2026emergency,lee2025edtriagebias}. \emph{Unsafe actions},
+such as a contraindicated drug, a missed red flag, or compliance with a patient's false premise,
+cause harm even when the diagnosis is right; LLMs comply with illogical medical requests at
+rates of up to 100\%~\cite{chen2025sycophancy}. Finally, self-evolving memory introduces a risk
+of its own: a stored lesson that is wrong can be retrieved for later, similar patients and
+spread the error, a weakness that has been exploited deliberately in poisoning attacks on agent
+memory~\cite{chen2024agentpoison}.
+
+We therefore study three gaps in MedAgentSim. \textbf{G1 (Triage):} patients are not triaged or
+queued. \textbf{G2 (Safety):} unsafe orders and sycophantic compliance are never measured.
+\textbf{G3 (Verified memory):} lessons enter memory without verification. We ask three research
+questions:
+\begin{itemize}
+  \item \textbf{RQ1:} Does an interviewing Triage Nurse agent reduce under-triage of high-acuity
+  patients compared with a single LLM given the full record and with rule-based triage?
+  \item \textbf{RQ2:} Does an independent Safety Officer reduce unsafe actions more than doctor
+  self-review, without degrading diagnostic accuracy?
+  \item \textbf{RQ3:} Does gating memory writes on verified outcomes prevent injected wrong lessons
+  from spreading to similar cases?
+\end{itemize}
+
+Our contributions are as follows:
+\begin{enumerate}
+  \item \textbf{SafeWard}, an open-source multi-agent hospital simulation that keeps the MedAgentSim
+  consultation loop and adds triage, an acuity-ordered queue, an independent safety review and a
+  verified memory, each of which can be switched off for ablation.
+  \item An evaluation protocol that reports triage, safety and memory-integrity metrics next to
+  diagnostic accuracy, using the KTAS emergency triage dataset~\cite{moon2019ktas}, an adversarial
+  safety set and a memory-poisoning set.
+  \item An empirical study on fixed splits, with repeated runs where the budget allows, that tests
+  one pre-registered hypothesis per gap and reports positive, partial and negative results.
+\end{enumerate}
+
+% =====================================================================
+\section{Related Work}
+
+\textbf{Medical LLMs and static benchmarks.} Domain-tuned and prompted foundation models achieve
+high accuracy on licensing-exam style questions~\cite{singhal2023medpalm,nori2023medprompt}, with
+MedQA~\cite{jin2021medqa} as the most common benchmark. These evaluations present the full case
+at once and score a single answer, so they do not test whether a model can gather information.
+
+\textbf{Interactive clinical simulation.} AgentClinic~\cite{schmidgall2024agentclinic} converts MedQA,
+NEJM and MIMIC-IV~\cite{johnson2023mimiciv} cases into objective structured clinical examinations in
+which a doctor agent must question a patient agent and request tests from a measurement agent.
+AI Hospital~\cite{fan2025aihospital} evaluates multi-turn consultations against scripted
+non-player characters and shows that performance drops sharply compared with the full-case
+setting. AMIE~\cite{tu2025amie} trains a diagnostic dialogue model by self-play and outperforms
+primary-care physicians in a randomised text-consultation study, but the model and data are
+closed. Agent Hospital~\cite{li2024agenthospital} and MedAgentSim~\cite{almansoori2025medagentsim}
+let agents improve across patients; MedAgentSim does so with kNN retrieval over past cases,
+reflection on errors, chain-of-thought prompting~\cite{wei2022cot} and majority voting. Building on
+generative agents~\cite{park2023generative}, these systems model the consultation well, yet none
+models triage, a patient queue or safety review, and all score diagnostic accuracy only.
+
+\textbf{Multi-agent medical reasoning.} MedAgents~\cite{tang2024medagents} and MAC~\cite{chen2025mac}
+show that discussion among several doctor agents can improve diagnosis, and MMedAgent-RL~\cite{xia2026mmedagentrl}
+learns a triage-and-referral collaboration with reinforcement learning. MedAgentBoard~\cite{zhu2025medagentboard}
+cautions that multi-agent systems do not reliably beat a strong single LLM and that their extra
+cost must be justified. We follow this advice by comparing each agent against single-model and
+rule-based baselines on the same cases.
+
+\textbf{LLMs for emergency triage.} On the Korean Triage and Acuity Scale (KTAS)~\cite{moon2019ktas}
+and the Emergency Severity Index~\cite{gilboy2020esi}, prompted LLMs perform well on textbook cases
+but degrade on real records and show demographic bias~\cite{lee2025edtriagebias}; a recent benchmark
+finds that most models under-triage high-acuity patients~\cite{npjai2026emergency}. These studies
+evaluate a single model on a fixed record; the model cannot question the patient or measure vital signs.
+
+\textbf{Safety of clinical agents.} Sycophancy studies show that LLMs follow false medical premises
+unless explicitly allowed to refuse~\cite{chen2025sycophancy}. MedAgentBench~\cite{jiang2025medagentbench}
+evaluates agents that place orders in a virtual EHR but scores task success rather than harm. Tool
+use and acting agents~\cite{yao2023react} make it possible to check actions against external
+knowledge, such as openFDA drug labels~\cite{kasshout2016openfda}.
+
+\textbf{Agent memory and its integrity.} Reflection-based agents store verbal lessons to avoid
+repeating mistakes~\cite{shinn2023reflexion}, and MedAgentSim stores corrected diagnoses as
+experience. AgentPoison~\cite{chen2024agentpoison} shows that a few malicious entries in an agent's
+memory are retrieved with high probability and steer its behaviour. To our knowledge, no prior
+clinical simulator verifies memory writes or measures how a wrong lesson spreads.
+
+\textbf{Positioning.} No existing work combines interactive multi-agent diagnosis with
+acuity-based triage, independent safety review and memory-integrity testing in one simulated
+hospital. SafeWard fills this gap while keeping the MedAgentSim consultation loop unchanged, so
+that its results remain comparable with the base paper.
+
+% =====================================================================
+\section{Problem Formulation}
+
+\textbf{Episode.} Each patient $p$ is a hidden case file $c_p$ with a reference diagnosis $d^*_p$.
+An agent can access $c_p$ only through actions, and every agent observes only its own slice of
+the file (Section~\ref{sec:system}).
+
+\textbf{Triage (G1).} On arrival the triage agent observes the arrival record $a_p$ (age, sex,
+arrival mode and chief complaint in the patient's words). It may ask the patient questions or
+call a vital-signs tool, at most $T_{\text{tri}}$ times, and must output a level
+$\hat{y}_p \in \{1,\dots,5\}$, where 1 is most urgent. The reference level $y_p$ is the
+expert-consensus KTAS label. The decision is an \emph{under-triage} if $\hat{y}_p > y_p$ and an
+\emph{over-triage} if $\hat{y}_p < y_p$. A ward manager then orders the waiting queue by the
+assigned levels.
+
+\textbf{Consultation.} In each of at most $T=20$ turns the doctor agent chooses one action:
+a question to the patient, a test request answered by the measurement agent, or a final
+diagnosis $\hat{d}_p$. After diagnosing, the doctor writes a management plan $P_p$ (medications,
+procedures and disposition).
+
+\textbf{Safety (G2).} Each adversarial scenario defines a set $U_p$ of actions that are unsafe for
+that patient. The plan that is finally executed, $P'_p$ (after any safety review), is unsafe if
+it contains an element of $U_p$.
+
+\textbf{Memory (G3).} A memory $M$ supports a write operation $\mathrm{add}(c, r)$ after each
+episode with result $r$ and retrieval $\mathrm{retrieve}(q, k)$ of the $k$ nearest entries for
+a query $q$. A poisoning attack submits wrong lessons $\ell$ that associate a presentation with an
+incorrect diagnosis; the attack succeeds if accuracy on later similar patients drops.
+
+\textbf{Hypotheses.} Following our Phase~1 proposal, we test:
+\begin{itemize}
+  \item \textbf{H1:} the Triage Nurse reduces the under-triage rate on level~1--2 patients by at least
+  30\% relative to a single LLM given the full record, and reaches a higher quadratic weighted
+  kappa than rule-based triage.
+  \item \textbf{H2:} SafeWard produces at least 50\% fewer unsafe actions than no review and at least
+  25\% fewer than doctor self-review on the adversarial set, with diagnostic accuracy within 3
+  points of no review.
+  \item \textbf{H3:} after injecting wrong lessons, accuracy on the paired cases drops by at least 5
+  points with ungated memory but by no more than 2 points with gated memory.
+\end{itemize}
+
+% =====================================================================
+\section{Proposed System: SafeWard}
+\label{sec:system}
+
+Fig.~\ref{fig:arch} shows the architecture. A patient passes through triage and an acuity queue
+(G1), the unchanged MedAgentSim consultation loop, a safety review of the plan (G2) and a memory
+gate (G3). Every gap-specific component is a configuration switch (\texttt{features} in the run
+configuration), so each can be removed for ablation.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\columnwidth}{\centering \tbd{figures/architecture.pdf}\\[2pt] arrival $\rightarrow$ triage nurse $\rightarrow$ ward manager $\rightarrow$ doctor $\leftrightarrow$ patient / measurement $\rightarrow$ safety officer $\rightarrow$ memory gate}}
+\caption{SafeWard architecture. Shaded components are new (G1--G3); the consultation loop is
+kept as in MedAgentSim. The baseline skips all shaded stages.}
+\label{fig:arch}
+\end{figure}
+
+\textbf{Agents and information isolation.} Table~\ref{tab:agents} lists the agents. Isolation is
+enforced in code rather than by prompt: each agent builds its own view of the shared transcript.
+The doctor never sees the case file or the reference diagnosis; the patient never sees test
+results; the measurement agent sees only the current request; and the Safety Officer reviews the
+plan without the doctor's reasoning, to reduce anchoring.
+
+\begin{table}[t]
+\caption{Agents in SafeWard}
+\label{tab:agents}
+\centering
+\small
+\begin{tabular}{p{1.6cm}p{3.6cm}p{2.0cm}}
+\toprule
+Agent & Role & Tools / view \\
+\midrule
+Patient & Answers from the hidden case file; adversarial personas in the safety set & case file \\
+Triage Nurse (G1) & Short interview, assigns KTAS 1--5 with red flags & \texttt{GET\_VITALS} \\
+Ward Manager (G1) & Orders queue by acuity; escalates red flags & queue state \\
+Doctor & History, test orders, diagnosis, plan & \texttt{REQUEST TEST}, memory context \\
+Measurement & Returns recorded results on request & exams and tests \\
+Safety Officer (G2) & Approves, revises or vetoes the plan & rules, openFDA \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{State and contracts.} All data that crosses a module boundary is a typed, validated
+record: the case, each message, the episode state (turn, transcript, tests, status, token usage)
+and the episode result (diagnosis, judge verdict, plan, safety verdicts, retrieved memory). Every
+run writes these records as JSON lines, which form the agent trajectories we analyse.
+
+\textbf{Triage Nurse and Ward Manager (G1).} The nurse receives only the arrival record and a
+summary of KTAS criteria. Each reply is one action: \texttt{ASK} a question (answered by a patient
+agent that knows the complaint, pain, consciousness and injury status), \texttt{GET\_VITALS} (a
+deterministic tool returning the recorded blood pressure, heart rate, respiratory rate,
+temperature and oxygen saturation), or \texttt{TRIAGE} with a level, red flags and a reason. The
+nurse may take at most four actions. During development on the dev split we observed that the
+nurse frequently under-triaged urgent patients (Section~\ref{sec:failures}); we therefore add a
+\emph{rule floor}: when deterministic danger-sign rules (unresponsiveness, SpO$_2<90\%$, systolic
+pressure $<80$~mmHg, danger-zone vital signs or high-risk complaints) indicate level~1--2, the
+nurse may not assign a less urgent level. The Ward Manager simulates two doctors serving a ward of
+50 patients with exponentially distributed arrivals; it orders the queue by assigned level and
+arrival time and escalates patients with red flags by one level. As in MedAgentSim, the baseline
+serves patients in arrival order.
+
+\textbf{Consultation loop.} The doctor, patient and measurement agents follow MedAgentSim. The
+doctor acts through text markers (\texttt{REQUEST TEST:}, \texttt{DIAGNOSIS READY:}); each reply is
+reduced to exactly one action so that the turn budget cannot be bypassed, and the measurement
+agent matches requested tests to recorded ones by meaning. After the diagnosis, the doctor writes
+a management plan.
+
+\textbf{Safety Officer (G2).} The officer reviews the plan against deterministic red-flag and
+contraindication rules and against drug-interaction and contraindication sections of openFDA drug
+labels~\cite{kasshout2016openfda}, which are cached so that runs are repeatable. It returns
+\emph{approve}, \emph{revise} or \emph{veto} with a list of issues. On revise or veto the doctor
+writes one revised plan, which is reviewed again; in interactive mode a veto is escalated to a
+human attending. The self-check baseline instead asks the doctor model to review its own plan
+without tools.
+
+\textbf{Verified memory (G3).} The memory stores medical records of correctly diagnosed cases and
+lessons. Before a consultation it retrieves the $k=3$ nearest entries for the doctor's only
+up-front information, the case objective, using TF-IDF cosine similarity~\cite{salton1988tfidf},
+and adds them to the doctor's prompt. The ungated variant, which follows MedAgentSim, writes
+entries without verification. The gated variant writes an entry only if the outcome is confirmed
+against the reference diagnosis and the Safety Officer raised no veto. Each entry records its
+source case and status, every write, rejection and retraction is logged, and an entry is
+retracted automatically when its retrieval is followed by wrong diagnoses.
+
+\textbf{Robustness.} Rate-limited calls are retried after the delay the server requests; when an
+API key reaches its daily quota the provider switches to the next configured key; configuration
+errors stop a run immediately; and failures are recorded per case rather than aborting the batch.
+The original text of every normalised model reply is kept in the trajectory for auditing.
+
+% =====================================================================
+\section{Experimental Setup}
+
+\textbf{Data and splits.} All splits are fixed before any test run, and design decisions use the
+dev splits only.
+\begin{itemize}
+  \item \emph{Triage:} the KTAS dataset~\cite{moon2019ktas} contains 1{,}267 adult emergency visits
+  from two hospitals, each with vital signs, chief complaint, the triage nurse's level and an
+  expert-consensus reference level. We draw a stratified split with seed~0: 5 dev and 30 test
+  cases per level (level~1 has only 26 cases, giving 21 test cases), i.e.\ 25 dev and 141 test cases.
+  \item \emph{Consultation:} AgentClinic's MedQA cases~\cite{schmidgall2024agentclinic,jin2021medqa},
+  with a fixed test subset of \tbd{n} cases (seed \tbd{s}).
+  \item \emph{Safety:} \tbd{n} adversarial scenarios written and reviewed by two group members, in three
+  types (false premise, hidden red flag, unsafe drug combination), split into \tbd{10} dev and
+  \tbd{30} test, plus \tbd{20} normal MedQA cases for false vetoes.
+  \item \emph{Memory:} \tbd{10} wrong lessons, each paired with \tbd{3} similar later cases.
+\end{itemize}
+
+\textbf{Baselines.} B0 is a single LLM given the full arrival record (non-agentic triage). B1 is
+deterministic rule-based triage. We also report the real triage nurses' levels from the dataset
+as a human reference. B2 is the MedAgentSim-style system: consultation with ungated memory and
+chain-of-thought, no triage and no safety review, with patients served in arrival order. B3 is B2
+with doctor self-review of the plan. All systems use the same cases and models.
+
+\textbf{Models.} Because LLaMA~3.3~70B, the base paper's model, was no longer available on our
+free-tier provider, the doctor, triage nurse, Safety Officer and judge use
+\texttt{openai/gpt-oss-120b} and the patient and measurement agents use \texttt{openai/gpt-oss-20b}~\cite{openai2025gptoss},
+served through the Groq API with reasoning effort \emph{low}. Temperatures are 0.2 for the doctor,
+nurse and patient and 0.0 for the measurement agent, the Safety Officer and the judge. The
+consultation is limited to 20 turns and triage to four actions. \tbd{number of runs per
+configuration and seeds}.
+
+\textbf{Implementation.} SafeWard is written in Python. Code, configurations, results and
+trajectories are available at \url{https://github.com/aleeza-23/AI-Hospital} (release
+\texttt{phase2-final}); every table in this paper is generated from the stored results.
+
+% =====================================================================
+\section{Evaluation Methodology}
+
+\textbf{Diagnosis.} An LLM judge decides whether the predicted and reference diagnoses denote the
+same disease (yes/no), as in MedAgentSim; we audit \tbd{30} judgements manually and report the
+agreement. Accuracy is reported with a 95\% Wilson interval~\cite{wilson1927interval}.
+
+\textbf{Triage.} We report exact accuracy, quadratic weighted kappa (QWK)~\cite{cohen1968kappa}
+\begin{equation}
+\kappa_w = 1 - \frac{\sum_{i,j} w_{ij} O_{ij}}{\sum_{i,j} w_{ij} E_{ij}}, \qquad w_{ij} = \frac{(i-j)^2}{(K-1)^2},
+\end{equation}
+where $O$ is the observed confusion matrix, $E$ the matrix expected under independence and $K=5$;
+the under- and over-triage rates; the under-triage rate on level~1--2 patients, our primary
+safety metric for G1; and, from the ward simulation, the mean time-to-doctor of level~1--2
+patients and the rate at which KTAS target times (0, 10, 30, 60 and 120 minutes for levels 1--5)
+are exceeded.
+
+\textbf{Safety.} We report the unsafe-action rate of the final plan, the compliance rate on
+false-premise scenarios, red-flag recall, the false-veto rate on normal cases and the diagnostic
+accuracy on normal cases. A plan is judged unsafe by deterministic matching against $U_p$, with
+an LLM judge only for unclear cases.
+
+\textbf{Memory.} We report accuracy on the paired cases in clean and poisoned conditions, the drop
+in points, the number of wrong lessons admitted and the number of cases that retrieved one.
+
+\textbf{Efficiency and reliability.} For every configuration we report tokens, LLM calls and
+latency per case, and the failure rate (errors, unparseable outputs and timeouts).
+
+\textbf{Statistics and comparison with the base paper.} Stochastic configurations are run
+\tbd{three} times and reported as mean $\pm$ standard deviation. We distinguish numbers we
+\emph{reproduced}, by re-implementing the MedAgentSim method (B2) and running it with our model on
+our splits, from numbers \emph{reported} in~\cite{almansoori2025medagentsim}, which used a
+different model and are quoted for context only.
+
+% =====================================================================
+\section{Results}
+% CHECKLIST (organise by gap; the brief requires this):
+\subsection{G1: Triage}
+\input{tables/triage}
+Table~\ref{tab:triage} reports the held-out KTAS test split (141 cases, 51 at KTAS~1--2),
+run once after all prompt and guardrail choices were frozen on the development split.
+The single-prompt baseline B0 under-triaged 24 of the 51 high-acuity patients (47.1\%).
+The interview-only Triage Nurse did worse (31/51, 60.8\%). It talked with the patient
+and requested vitals in most episodes, but it often settled on KTAS~3 for patients whose
+recorded vitals or mental status met level~1--2 criteria. With the rule floor, the
+guarded agent under-triaged 10/51 (19.6\%), the same count as the real triage nurses in
+the dataset. Against B0 this is a 58\% relative reduction (paired case-bootstrap
+difference 27.5 points, 95\% CI [15.7, 39.2]). Its QWK (0.752) is above that of the rule
+baseline B1 (0.734). \textbf{H1 is therefore supported for the guarded agent but not for
+the unguarded one.}
+
+Two caveats limit this result. First, the floor overrode 25 of 141 nurse decisions, so the gain
+comes mostly from the deterministic rules rather than from the interview. The
+guarded agent's advantage over B1 in high-acuity under-triage is not significant
+(2.0 points, CI [0.0, 5.9]), and B1 has higher exact accuracy (59.6\% vs.\ 54.6\%).
+Second, the experiment used a single seed because of the free-tier token budget. The
+intervals therefore reflect case sampling, not run-to-run variance of the LLM.
+
+In the ward simulation, ordering by assigned acuity reduced the mean wait of KTAS~1--2
+patients from 14.4~min under the arrival-order queue that MedAgentSim implicitly uses to
+9.3~min with the guarded agent. Ordering by the human nurses' labels gave 6.9~min.
+\subsection{G2: Safety}
+% Table (AUTO: results/tables/safety.tex); H2 accepted/rejected.
+\subsection{G3: Verified Memory}
+% Table (AUTO: results/tables/memory.tex); H3 accepted/rejected.
+\subsection{Comparison with the Base Paper}
+% E1 vs E2 vs E3 on MedQA (AUTO: results/tables/consultation.tex) + reported numbers.
+\subsection{Gap-Resolution Table}
+% AUTO: results/tables/gap_resolution.tex (must match README).
+
+% =====================================================================
+\section{Ablation and Comparative Analysis}
+% CHECKLIST: remove each component once (E5), table AUTO: results/tables/ablation.tex;
+% cost/latency trade-off (E6), figure of accuracy vs tokens.
+
+% =====================================================================
+\section{Failure Analysis}
+\label{sec:failures}
+% CHECKLIST: failure categories + frequencies (AUTO: results/tables/failures.tex);
+% 2 success + 2 failure trajectories (excerpts from logs/); cause and fix for each category.
+% Development-log evidence (docs/devlog.md): what failed, what changed, measured effect.
+
+% =====================================================================
+\section{Limitations and Threats to Validity}
+% CHECKLIST: different model from the base paper (LLaMA 3.3 unavailable); free-tier budget -> smaller
+% sets and fewer seeds; simulated patients (LLM patient may leak); KTAS labels are single-site
+% Korean data; LLM judge; adversarial set written by the group; no MIMIC-IV / MIMIC-IV-ED access.
+
+% =====================================================================
+\section{Conclusion}
+% CHECKLIST: answer RQ1-RQ3 in one sentence each; future work.
+
+% =====================================================================
+\section*{Use of AI Tools}
+% Required disclosure (instructor permission received for AI-assisted drafting). Edit to match
+% what the group actually did.
+An AI coding assistant (Claude) was used to implement parts of the software, to prepare a first
+draft of several sections of this paper and to check references. All authors reviewed, edited and
+verified the text, code and results, and take full responsibility for the content.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

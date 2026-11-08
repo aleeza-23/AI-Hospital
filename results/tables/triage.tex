@@ -1,0 +1,14 @@
+\begin{table}[t]\centering\small
+\caption{G1 triage on the KTAS test split ($n=141$, 1 seed). UT = under-triage rate (\%); UT$_{1\text{-}2}$ restricted to KTAS 1--2. Wait = mean simulated wait of KTAS 1--2 patients (min).}
+\label{tab:triage}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lcccccc}\toprule
+Method & Acc & QWK & UT & UT$_{1\text{-}2}$ & Tok/case & Wait \\ \midrule
+Human nurse (KTAS\_RN) & 84.4 & 0.949 & 12.1 & 19.6 & -- & 6.9 \\
+B1 Rules & 59.6 & 0.734 & 14.2 & 21.6 & -- & 8.6 \\
+B0 Single LLM & 46.1 & 0.720 & 34.0 & 47.1 & 506 & 11.2 \\
+Triage Nurse (no floor) & 39.7 & 0.660 & 35.5 & 60.8 & 1864 & 11.2 \\
+\textbf{SafeWard G1} (nurse + floor) & 54.6 & 0.752 & 19.1 & 19.6 & 1864 & 9.3 \\
+\midrule
+FIFO queue (MedAgentSim, no triage) & -- & -- & -- & -- & -- & 14.4 \\
+\bottomrule\end{tabular}\end{table}

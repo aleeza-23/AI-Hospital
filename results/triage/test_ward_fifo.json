@@ -1,0 +1,7 @@
+{
+  "mean_wait_all_min": 14.918,
+  "mean_wait_high_acuity_min": 14.376,
+  "max_wait_high_acuity_min": 44.808,
+  "target_violation_rate": 0.3,
+  "target_violation_rate_high_acuity": 0.589
+}
