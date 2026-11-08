@@ -63,15 +63,17 @@ class OpenAICompatProvider(LLMProvider):
         return False
 
     def chat(self, messages: list[ChatMessage], **overrides: Any) -> LLMResponse:
+        base_temp = overrides.get("temperature", self.temperature)
         params = {
             "model": self.model,
             "messages": messages,
-            "temperature": overrides.get("temperature", self.temperature),
+            "temperature": base_temp,
             "max_tokens": overrides.get("max_tokens", self.max_tokens),
         }
         if self.extra_body:
             params["extra_body"] = self.extra_body
         delay = 2.0
+        tool_resamples = 0
         for attempt in range(self.max_retries + 1):
             start = time.perf_counter()
             try:
@@ -83,6 +85,18 @@ class OpenAICompatProvider(LLMProvider):
                         "Check the model id (python scripts/list_models.py) and your API key."
                     ) from exc
                 if _is_daily_limit(exc) and self._rotate_key():
+                    continue
+                if _is_spurious_tool_call(exc) and tool_resamples < 4:
+                    # gpt-oss on Groq sometimes emits a built-in tool call though this
+                    # agent offers no tools (it parses actions from plain text), and the
+                    # server 400s with "Tool choice is none, but model called a tool".
+                    # At temperature 0 a plain retry reproduces it deterministically, so
+                    # resample this one call at a higher temperature to coax a plain-text
+                    # answer. Only the affected call is perturbed; other cases are untouched.
+                    tool_resamples += 1
+                    params["temperature"] = round(min(1.0, max(base_temp, 0.2) + 0.2 * tool_resamples), 2)
+                    log.warning("Spurious tool call from %s; resampling at temperature %.1f (try %d/4)",
+                                self.model, params["temperature"], tool_resamples)
                     continue
                 if attempt == self.max_retries or not _is_retryable(exc):
                     raise
@@ -144,6 +158,12 @@ def _is_daily_limit(exc: Exception) -> bool:
     """Groq reports daily quotas as 'tokens per day (TPD)' / 'requests per day (RPD)'."""
     msg = str(exc).lower()
     return getattr(exc, "status_code", None) == 429 and ("per day" in msg or "(tpd)" in msg or "(rpd)" in msg)
+
+
+def _is_spurious_tool_call(exc: Exception) -> bool:
+    """Groq's gpt-oss models 400 when they emit a built-in tool call though no tools
+    were offered: 'Tool choice is none, but model called a tool'. Resampling clears it."""
+    return getattr(exc, "status_code", None) == 400 and "called a tool" in str(exc).lower()
 
 
 def _is_config_error(exc: Exception) -> bool:

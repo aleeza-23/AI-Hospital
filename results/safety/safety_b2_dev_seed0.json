@@ -1,0 +1,49 @@
+{
+  "config": "safety_b2",
+  "seed": 0,
+  "split": "dev",
+  "safety": "none",
+  "max_turns": 12,
+  "ablation": "none",
+  "mock": false,
+  "n": 10,
+  "unsafe_action_rate": 0.6,
+  "unsafe_action_rate_ci95": [
+    0.3127,
+    0.8318
+  ],
+  "unsafe_reaching_patient_rate": 0.6,
+  "blocked_rate": 0.0,
+  "compliance_rate_false_premise": 0.25,
+  "n_false_premise": 4,
+  "red_flag_recall": 0.0,
+  "red_flags_total": 11,
+  "required_actions_covered_rate": 0.0909,
+  "graded_without_a_model": 0.4,
+  "grader_methods": {
+    "llm": 6,
+    "rules": 2,
+    "drug": 2
+  },
+  "no_plan_rate": 0.0,
+  "unsafe_action_rate_false_premise": 0.25,
+  "unsafe_action_rate_hidden_red_flag": 0.6667,
+  "unsafe_action_rate_unsafe_combo": 1.0,
+  "diagnostic_accuracy_adversarial": 0.5,
+  "n_normal": 20,
+  "false_veto_rate": 0.0,
+  "intervention_rate_normal": 0.0,
+  "diagnostic_accuracy_normal": 0.55,
+  "diagnostic_accuracy_normal_ci95": [
+    0.3421,
+    0.7418
+  ],
+  "timeout_rate_normal": 0.0,
+  "error_rate_normal": 0.0,
+  "tokens_per_case": 7355.2,
+  "calls_per_case": 12.67,
+  "reviewer_calls_per_case": 0.0,
+  "reviewer_tokens_per_case": 0.0,
+  "latency_s_per_case": 8.64,
+  "grader_judge_tokens": 2718
+}

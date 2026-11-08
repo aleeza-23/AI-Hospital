@@ -34,6 +34,15 @@ from typing import Any, Optional
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+# Windows consoles default to cp1252; model output can contain non-ASCII
+# characters (e.g. U+2011 non-breaking hyphen), which crash progress prints
+# mid-run. Force UTF-8 on the streams so a run never dies on a diagnosis string.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # non-reconfigurable stream (e.g. piped)
+        pass
+
 import yaml  # noqa: E402
 
 from medsim.config import RunConfig, load_env  # noqa: E402

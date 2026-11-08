@@ -33,10 +33,19 @@ from typing import Any, Optional
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+# Windows consoles default to cp1252; model output can contain non-ASCII
+# characters (e.g. U+2011 non-breaking hyphen), which crash progress prints
+# mid-run. Force UTF-8 on the streams so a run never dies on a diagnosis string.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):  # non-reconfigurable stream (e.g. piped)
+        pass
+
 import yaml  # noqa: E402
 
 from medsim.config import RunConfig, load_env  # noqa: E402
-from medsim.contracts import Case, EpisodeResult, SafetyDecision, Usage  # noqa: E402
+from medsim.contracts import Case, EpisodeResult, EpisodeStatus, SafetyDecision, Usage  # noqa: E402
 from medsim.data import load_cases  # noqa: E402
 from medsim.eval.metrics import wilson_ci  # noqa: E402
 from medsim.pipeline import build_runner  # noqa: E402
@@ -153,10 +162,17 @@ def read_log(path: Path) -> list[EpisodeResult]:
 
 
 def run_set(runner, cases: list[Case], path: Path, resume: bool, label: str) -> list[EpisodeResult]:
-    done = read_log(path) if resume else []
+    # Errored episodes are not "done": a transient failure (e.g. a provider 400)
+    # must be retried, not frozen into the results. Keep only completed episodes on
+    # resume and rewrite the log without the errors so it never accumulates stale lines.
+    done = [r for r in read_log(path) if r.status != EpisodeStatus.ERROR] if resume else []
     seen = {r.case_id for r in done}
     if not resume and path.exists():
         path.unlink()
+    elif resume and path.exists():
+        with open(path, "w", encoding="utf-8") as f:
+            for r in done:
+                f.write(r.model_dump_json() + "\n")
     results = list(done)
     todo = [c for c in cases if c.id not in seen]
     print(f"  [{label}] {len(todo)} to run, {len(seen)} already done")
