@@ -46,10 +46,10 @@ for _stream in (sys.stdout, sys.stderr):
 import yaml  # noqa: E402
 
 from medsim.config import RunConfig, load_env  # noqa: E402
-from medsim.contracts import Case, EpisodeResult, Usage  # noqa: E402
+from medsim.contracts import Case, EpisodeResult, EpisodeStatus, Usage  # noqa: E402
 from medsim.data import load_cases  # noqa: E402
 from medsim.eval.metrics import wilson_ci  # noqa: E402
-from medsim.memory.stores import BaseMemory  # noqa: E402
+from medsim.memory.stores import BaseMemory, GatedMemory, UngatedMemory  # noqa: E402
 from medsim.pipeline import build_runner  # noqa: E402
 
 MEMORIES = ("ungated", "gated")
@@ -120,12 +120,22 @@ def poison_in(result: EpisodeResult, rows: list[dict[str, Any]]) -> list[str]:
     """Which wrong lessons were shown to the doctor for this case.
 
     Decided from the persisted EpisodeResult.memory_context, so the number is the
-    same whether a run completed in one go or was resumed. A submitted lesson is
-    stored with its text as the entry summary, so it appears in the context
-    verbatim; 80 characters is well past the point where two lessons differ.
+    same whether a run completed in one go or was resumed.
+
+    Matching on the START of the lesson text was wrong: each lesson opens by
+    restating the case objective, and for 6 of the 10 that restatement is longer
+    than the 80 characters compared, so an ordinary episode-derived record for the
+    same case matched. That reported a wrong lesson as retrieved in the CLEAN arm,
+    where nothing is ever injected.
+
+    The context line is `- Case: <summary> -> Diagnosis: <dx>. Lesson: <insight>`.
+    Only a submitted lesson carries its own text as the insight; an episode entry
+    carries "Confirmed correct." or "Recorded from an unverified episode outcome."
+    Matching the `Lesson:` field therefore identifies poison and nothing else.
     """
     context = result.memory_context or ""
-    return sorted({row["lesson_id"] for row in rows if row["lesson"][:80] in context})
+    return sorted({row["lesson_id"] for row in rows
+                   if f"Lesson: {row['lesson'][:60]}" in context})
 
 
 def read_log(path: Path) -> list[EpisodeResult]:
@@ -153,10 +163,17 @@ def run_arm(memory_name: str, condition: str, seed: int, rows: list[dict[str, An
 
     tag = f"{memory_name}_{condition}_seed{seed}"
     log_path = LOG_DIR / f"{tag}.jsonl"
-    done = read_log(log_path) if resume else []
+    # An errored episode is not "done": a transient failure (a provider 400, a
+    # dropped connection) must be retried on resume, not frozen into the results.
+    # The log is rewritten without the error lines so it never accumulates stale ones.
+    done = [r for r in read_log(log_path) if r.status != EpisodeStatus.ERROR] if resume else []
     seen = {r.case_id for r in done}
     if not resume and log_path.exists():
         log_path.unlink()
+    elif resume and log_path.exists():
+        with open(log_path, "w", encoding="utf-8") as f:
+            for r in done:
+                f.write(r.model_dump_json() + "\n")
 
     print(f"-- {tag}: {len(cases)} cases, {setup['seeded']} prefilled, "
           f"{setup['lessons_admitted']}/{setup['lessons_submitted']} wrong lessons admitted")
@@ -172,6 +189,26 @@ def run_arm(memory_name: str, condition: str, seed: int, rows: list[dict[str, An
               f"{'CORRECT' if result.correct else 'WRONG  '} "
               f"poison_shown={poison_in(result, rows) or '-'}", flush=True)
 
+    metrics = build_metrics(memory_name, condition, seed, mock, rows, results, memory, setup)
+    (RES_DIR / f"{tag}.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    with open(LOG_DIR / f"{tag}_memory_audit.jsonl", "w", encoding="utf-8") as f:
+        for event in memory.audit:
+            f.write(event.model_dump_json() + "\n")
+    print(f"== {tag}: accuracy={metrics['accuracy']} "
+          f"admitted={metrics['lessons_admitted']} "
+          f"poison_retrieved_for={metrics['cases_retrieving_a_wrong_lesson']}/{metrics['n']} "
+          f"tokens/case={metrics['tokens_per_case']}")
+    return metrics
+
+
+def build_metrics(memory_name: str, condition: str, seed: int, mock: bool,
+                  rows: list[dict[str, Any]], results: list[EpisodeResult],
+                  memory: BaseMemory, setup: dict[str, Any]) -> dict[str, Any]:
+    """Every reported number for one arm, from the episodes and the memory state.
+
+    Split out of run_arm so --recompute can re-derive it from the committed logs
+    without a provider, an API key or a single model call.
+    """
     # Read out of EpisodeResult.memory_context, which is persisted, rather than out
     # of the live memory: otherwise a resumed run reports 0 for every case it skipped.
     retrieved_poison = {r.case_id: hits for r in results if (hits := poison_in(r, rows))}
@@ -180,7 +217,7 @@ def run_arm(memory_name: str, condition: str, seed: int, rows: list[dict[str, An
     usage = total_usage(results)
     tokens = sum(u.prompt_tokens + u.completion_tokens for u in usage.values())
     stats = memory.stats()
-    metrics: dict[str, Any] = {
+    return {
         "memory": memory_name, "condition": condition, "seed": seed, "mock": mock,
         "n": n,
         "accuracy": round(correct / n, 4) if n else None,
@@ -202,14 +239,55 @@ def run_arm(memory_name: str, condition: str, seed: int, rows: list[dict[str, An
         "timeout_rate": round(sum(r.status.value == "timeout" for r in results) / n, 4) if n else None,
         "error_rate": round(sum(r.status.value == "error" for r in results) / n, 4) if n else None,
     }
+
+
+def recompute_arm(memory_name: str, condition: str, seed: int, rows: list[dict[str, Any]],
+                  cases: list[Case]) -> Optional[dict[str, Any]]:
+    """Re-derive one arm's metrics from its committed log. No provider, no API key.
+
+    The memory is replayed offline: pre-fill, inject the lessons for the poisoned
+    arm, then walk the logged episodes in order calling context_for and add, which
+    are pure Python. That reproduces the entries, retractions and audit trail
+    exactly, because they depend only on what was written and in what order.
+
+    `replayed_context_matches` records whether the replayed retrieval agrees with
+    the memory_context stored in the log. It should always be true; if it is not,
+    the replay is not faithful and the memory figures should not be trusted.
+    """
+    tag = f"{memory_name}_{condition}_seed{seed}"
+    log_path = LOG_DIR / f"{tag}.jsonl"
+    results = [r for r in read_log(log_path) if r.status != EpisodeStatus.ERROR]
+    if not results:
+        print(f"-- {tag}: no log to recompute from, skipped")
+        return None
+
+    memory: BaseMemory = UngatedMemory() if memory_name == "ungated" else GatedMemory()
+    setup = prepare_memory(memory, rows, condition == "poisoned", cases)
+    setup.pop("poison_entry_ids")
+
+    by_id = {c.id: c for c in cases}
+    mismatches = 0
+    for result in results:
+        case = by_id.get(result.case_id)
+        if case is None:
+            continue
+        if memory.context_for(case) != (result.memory_context or ""):
+            mismatches += 1
+        memory.add(case, result)
+
+    metrics = build_metrics(memory_name, condition, seed, False, rows, results, memory, setup)
+    metrics["recomputed_from_logs"] = True
+    metrics["replayed_context_matches"] = mismatches == 0
+    if mismatches:
+        print(f"   !! {tag}: replayed context differs for {mismatches} case(s)")
     (RES_DIR / f"{tag}.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    with open(LOG_DIR / f"{tag}_memory_audit.jsonl", "w", encoding="utf-8") as f:
-        for event in memory.audit:
-            f.write(event.model_dump_json() + "\n")
-    print(f"== {tag}: accuracy={metrics['accuracy']} "
+    # The audit log is deliberately NOT rewritten. Its events replay identically, but
+    # its timestamps are from the real run and are the provenance record; a replay
+    # would overwrite them with the time of the recompute.
+    print(f"== {tag} (recomputed): accuracy={metrics['accuracy']} "
           f"admitted={metrics['lessons_admitted']} "
-          f"poison_retrieved_for={metrics['cases_retrieving_a_wrong_lesson']}/{n} "
-          f"tokens/case={metrics['tokens_per_case']}")
+          f"poison_retrieved_for={metrics['cases_retrieving_a_wrong_lesson']}/{metrics['n']} "
+          f"context_match={metrics['replayed_context_matches']}")
     return metrics
 
 
@@ -269,6 +347,8 @@ def main() -> None:
     ap.add_argument("--providers", default="experiments/configs/providers_groq.yaml")
     ap.add_argument("--limit", type=int, help="cap the paired cases (smoke runs)")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--recompute", action="store_true",
+                    help="re-derive metrics from the committed logs; no API key, no model calls")
     ap.add_argument("--mock", action="store_true", help="offline wiring check, no API key")
     args = ap.parse_args()
     load_env()
@@ -286,8 +366,11 @@ def main() -> None:
     for memory in memories:
         for condition in conditions:
             for seed in range(args.seeds):
-                run_arm(memory, condition, seed, rows, cases,
-                        ROOT / args.providers, args.mock, args.resume)
+                if args.recompute:
+                    recompute_arm(memory, condition, seed, rows, cases)
+                else:
+                    run_arm(memory, condition, seed, rows, cases,
+                            ROOT / args.providers, args.mock, args.resume)
     summarize()
 
 

@@ -46,7 +46,7 @@ for _stream in (sys.stdout, sys.stderr):
 import yaml  # noqa: E402
 
 from medsim.config import RunConfig, load_env  # noqa: E402
-from medsim.contracts import Case, EpisodeResult  # noqa: E402
+from medsim.contracts import Case, EpisodeResult, EpisodeStatus  # noqa: E402
 from medsim.data import load_cases  # noqa: E402
 from medsim.eval import compute_metrics  # noqa: E402
 from medsim.pipeline import build_runner  # noqa: E402
@@ -139,10 +139,17 @@ def run_one(name: str, seed: int, cases: list[Case], providers: Path, mock: bool
     runner = make_runner(cfg, mock)
     tag = f"{cfg.run_name}_seed{seed}"
     log_path = LOG_DIR / f"{tag}.jsonl"
-    done = read_log(log_path) if resume else []
+    # An errored episode is not "done": a transient failure (a provider 400, a
+    # dropped connection) must be retried on resume, not frozen into the results.
+    # The log is rewritten without the error lines so it never accumulates stale ones.
+    done = [r for r in read_log(log_path) if r.status != EpisodeStatus.ERROR] if resume else []
     seen = {r.case_id for r in done}
     if not resume and log_path.exists():
         log_path.unlink()
+    elif resume and log_path.exists():
+        with open(log_path, "w", encoding="utf-8") as f:
+            for r in done:
+                f.write(r.model_dump_json() + "\n")
 
     print(f"-- {tag}: memory={cfg.features.memory} safety={cfg.features.safety} "
           f"cot={cfg.features.cot} | {len(cases) - len(seen)} to run, {len(seen)} done")

@@ -28,5 +28,7 @@
   "calls_per_case": 12.83,
   "latency_s_per_case": 7.43,
   "timeout_rate": 0.0,
-  "error_rate": 0.0
+  "error_rate": 0.0,
+  "recomputed_from_logs": true,
+  "replayed_context_matches": true
 }

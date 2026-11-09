@@ -468,6 +468,48 @@ def test_ungated_admits_every_wrong_lesson_and_gated_admits_none():
     assert admitted == {"ungated": 10, "gated": 0}
 
 
+def _poison_in():
+    """Import the runner's matcher without running it (it is a script, not a package)."""
+    import importlib.util
+
+    path = REPO / "experiments" / "run_memory_poisoning.py"
+    spec = importlib.util.spec_from_file_location("run_memory_poisoning", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.poison_in
+
+
+def _ctx_result(context: str) -> EpisodeResult:
+    return EpisodeResult(case_id="x", source="t", correct_diagnosis="d", final_diagnosis="d",
+                         status=EpisodeStatus.DIAGNOSED, num_turns=1, num_tests=0,
+                         transcript=[], tests_requested=[], usage={}, memory_context=context)
+
+
+def test_poison_detection_ignores_an_ordinary_episode_record():
+    """Each lesson opens by restating the objective, so matching its prefix matched
+    any episode record for the same case and reported poison in the CLEAN arm."""
+    poison_in = _poison_in()
+    row = next(r for r in _poison_rows()
+               if r["lesson"].split(". ")[0] + "." > r["lesson"][:60])
+    objective = row["lesson"].split(". ")[0] + "."
+    episode_context = (f"- Case: {objective} Tests: Chest_X-Ray -> Diagnosis: Something else. "
+                       f"Lesson: Recorded from an unverified episode outcome.")
+    assert poison_in(_ctx_result(episode_context), _poison_rows()) == []
+
+
+def test_poison_detection_still_finds_a_real_injected_lesson():
+    poison_in = _poison_in()
+    rows = _poison_rows()
+    row = rows[0]
+    injected = (f"- Case: {row['lesson']} -> Diagnosis: {row['claimed_diagnosis']}. "
+                f"Lesson: {row['lesson']}")
+    assert poison_in(_ctx_result(injected), rows) == [row["lesson_id"]]
+
+
+def test_poison_detection_reports_nothing_for_an_empty_context():
+    assert _poison_in()(_ctx_result(""), _poison_rows()) == []
+
+
 def test_each_wrong_lesson_is_retrieved_for_its_paired_cases():
     """A lesson that is never retrieved cannot mislead anyone, so it would test nothing."""
     rows = _poison_rows()

@@ -7,17 +7,21 @@ subset, neither of which was tuned on.
 
 ## Status
 
-**No LLM results yet.** Everything below was measured offline, with `MockProvider` and the
-committed data, because no `GROQ_API_KEY` is configured in this checkout. The retrieval
-index, both memories, the poisoning set and all three experiment scripts are complete and
-`pytest -q` passes (147 tests). The rows that need a model are marked `pending`.
+**Poisoning: done** (`--limit 12`, 1 seed, 48 episodes, zero errors) — see the 2026-11-09 row
+and `results/memory/`.
 
-To produce them:
+**Consultation E1 / E2 / E3: NOT RUN.** The code and configs are complete and verified offline,
+but no run has ever been executed, and `results/consultation/` does not exist. This is the one
+remaining gap in G3. It needs a `GROQ_API_KEY`, which is not present in every checkout; the
+member who has quota should run:
 
 ```bash
-python experiments/run_memory_poisoning.py              # 4 arms x 30 cases
-python experiments/run_consultation.py --configs all --n 40
+python experiments/run_consultation.py --configs e1 e2 e3 --n 20     # ~650K tokens
+python experiments/run_consultation.py --configs e1 e2 e3 --n 20 --resume   # after a daily cap
 ```
+
+Everything else below was measured offline with `MockProvider` and the committed data.
+`pytest -q` passes (164 tests).
 
 ## For the README
 
@@ -43,7 +47,10 @@ python experiments/run_consultation.py --configs all --n 40
 | 2026-11-08 | Poison retrieval during a *live* ungated run is lower than against a static memory, because ungated memory keeps writing a lesson from every episode as the run proceeds and those compete for the top k. | None: this is genuine MedAgentSim behaviour, not a defect. | On a 6-case mock arm, 4/6 live against 6/6 static. `wrong_lesson_retrieval_rate` is therefore reported as a measured quantity per run, never assumed to be 1.0. |
 | 2026-11-08 | — | The gate itself, checked against the committed data. | Ungated admits **10/10** wrong lessons; gated admits **0/10** and records a reason for each rejection. |
 | 2026-11-09 | Poisoning: accuracy clean vs poisoned, both memories. Ran `run_memory_poisoning.py --limit 12` (first 4 lesson families = 12 of 30 paired cases, 10 wrong lessons pre-filled, 1 seed) on gpt-oss-120b; ~389K tokens, zero errored episodes. | Measured the four arms. | **The gate blocks the poison as designed, but the accuracy harm is not demonstrated at this size.** Ungated: clean **0.583**, poisoned **0.583** -> drop **0.0** (10/10 wrong lessons admitted; a wrong lesson retrieved for 10/12 cases). Gated: clean **0.500**, poisoned **0.667** -> **0/10 wrong lessons admitted**. So the gate mechanism is unambiguous (10 -> 0 admitted), but on these 12 cases the retrieved poison did not flip the diagnosis, so ungated accuracy is flat and the hypothesis's ">=5-point ungated drop" is **not met** (n=12, 1 seed, no CI separation; the gated "<=2" is met only trivially). Honest reading: this run supports *"the gate prevents poison admission"* and does **not**, at this scale, establish *"poison degrades accuracy."* A larger `--limit` (more lesson families) and/or more seeds would be needed to test the accuracy claim. |
-| pending | — | E1 / E2 / E3 consultation runs | **needs an API key** |
+| 2026-11-09 | **`cases_retrieving_a_wrong_lesson` was overcounted, and the committed clean-arm figure was impossible.** `ungated_clean` reported a wrong lesson retrieved for 1 of 12 cases, in the arm where nothing is ever injected. Cause: the matcher tested whether the first 80 characters of a lesson appeared in `EpisodeResult.memory_context`, but every lesson opens by restating the case objective, and for **6 of the 10** that restatement is longer than 80 characters — so an ordinary episode-derived record for the same case matched. The false hit was `medqa_ext-0185`, whose context held an episode entry with insight "Recorded from an unverified episode outcome." | Match the `Lesson:` field of the context line instead. Only a submitted lesson carries its own text there; an episode entry carries "Confirmed correct." or "Recorded from an unverified episode outcome." | `ungated_clean` corrected from **1 to 0** (rate 0.0833 to 0.0), which is what the clean arm must report by construction. The other three arms were unaffected: ungated poisoned stays **10/12**, both gated arms **0/12**. Accuracy figures unchanged. Regression tests added. |
+| 2026-11-09 | Correcting that metric would normally mean re-running the arms, i.e. spending ~389K tokens again to fix an arithmetic error. | Added `--recompute`, which re-derives every number from the committed logs with no provider, no API key and no model call. The memory is replayed offline — pre-fill, inject, then walk the logged episodes calling `context_for` and `add`, which are pure Python — so entries, retractions and the audit trail are reproduced exactly. | All four arms recomputed for **0 tokens**. `replayed_context_matches` is **true** for all four, i.e. the replayed retrieval agrees with the `memory_context` stored in the log case for case, which is what makes the replay trustworthy. |
+| 2026-11-09 | **Both G3 runners froze transient failures into their results on resume.** `run_safety.py` had been fixed to treat an errored episode as not-done, but `run_consultation.py` and `run_memory_poisoning.py` still counted an `ERROR` status as finished, so a provider 400 or a dropped connection would be kept permanently and never retried. The consultation runs have not happened yet and will certainly be resumed across daily token caps, so this would have corrupted them. | Ported the fix to both: on resume, errored episodes are dropped and the log is rewritten without them, so only completed episodes are skipped. | The committed poisoning logs contain 48 episodes, all `diagnosed`, so nothing already measured was affected. Both runners verified fresh and resumed under `--mock`. |
+| pending | — | E1 / E2 / E3 consultation runs | **not run; needs an API key** |
 | pending | — | `DOCTOR_COT` and `DOCTOR_MEMORY` prompt tuning on dev | **needs an API key** |
 
 ## Design decisions worth stating in the paper

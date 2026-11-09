@@ -3,14 +3,38 @@
 **All code, data and tests for G1, G2 and G3 are complete and on `main`.** `pytest -q` passes
 (157 tests, CI green). Nothing in the repository is half-finished.
 
-Exactly two things are left, and neither can be done by writing code:
-
-1. **Run the experiments.** Needs Groq API keys. No configuration has ever been run against a
-   real model, so every results file and every devlog "measured effect" for G2/G3 is still empty.
-2. **Peer-review the 40 adversarial scenarios.** Needs two group members reading them. The brief
-   requires it and the field is deliberately left blank.
-
 Owner of this document: whoever picks the work up. Update it as you go.
+
+## Current state (2026-11-09)
+
+| Item | Status |
+|---|---|
+| G1 triage, dev + test | **done** — `results/triage/` |
+| G2 safety, dev + test split | **done** — `results/safety/` |
+| G2 peer review of the 40 scenarios | **done** — two members recorded in `metadata.reviewed_by` |
+| G3 memory poisoning (`--limit 12`, 1 seed) | **done** — `results/memory/` |
+| **G3 consultation E1 / E2 / E3** | **NOT RUN — the only remaining gap** |
+
+So only one thing is actually left:
+
+```bash
+python experiments/run_consultation.py --configs e1 e2 e3 --n 20
+```
+
+~650K tokens for 3 configurations x 20 cases. Re-run with `--resume` after a daily cap; it skips
+completed episodes and now correctly **retries errored ones** rather than freezing them. Nothing
+has ever been written to `results/consultation/`, and `docs/devlog_G3.md` has the row waiting.
+
+If quota is tight, `--configs e1 e2 --n 20` (~430K) still gives the MedAgentSim reproduction
+against the Phase 1 baseline, which is the comparison E2 exists for. Dropping to `--n 15` saves
+another quarter.
+
+**Useful to know:** `run_memory_poisoning.py --recompute` re-derives every poisoning number from
+the committed logs with **no API key and no model calls**. If a metric definition is ever found
+wrong, fix it and recompute instead of paying for the run twice.
+
+The rest of this document is the original brief, kept because the token budgeting, failure modes
+and review rubric are still the reference.
 
 ---
 
