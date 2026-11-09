@@ -1,0 +1,32 @@
+{
+  "memory": "gated",
+  "condition": "poisoned",
+  "seed": 0,
+  "mock": false,
+  "n": 12,
+  "accuracy": 0.6667,
+  "accuracy_ci95": [
+    0.3906,
+    0.8619
+  ],
+  "num_correct": 8,
+  "lessons_submitted": 10,
+  "lessons_admitted": 0,
+  "prefilled_records": 20,
+  "cases_retrieving_a_wrong_lesson": 0,
+  "wrong_lesson_retrieval_rate": 0.0,
+  "entries_active_at_end": 36,
+  "entries_retracted": 0,
+  "submitted_rejected": 10,
+  "memory_audit_events": {
+    "write": 36,
+    "reject": 14,
+    "retrieve": 10
+  },
+  "tokens_per_case": 7535.2,
+  "total_tokens": 90422,
+  "calls_per_case": 12.42,
+  "latency_s_per_case": 8.1,
+  "timeout_rate": 0.0,
+  "error_rate": 0.0
+}

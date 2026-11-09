@@ -1,0 +1,32 @@
+{
+  "memory": "ungated",
+  "condition": "clean",
+  "seed": 0,
+  "mock": false,
+  "n": 12,
+  "accuracy": 0.5833,
+  "accuracy_ci95": [
+    0.3195,
+    0.8067
+  ],
+  "num_correct": 7,
+  "lessons_submitted": 0,
+  "lessons_admitted": 0,
+  "prefilled_records": 20,
+  "cases_retrieving_a_wrong_lesson": 1,
+  "wrong_lesson_retrieval_rate": 0.0833,
+  "entries_active_at_end": 37,
+  "entries_retracted": 2,
+  "submitted_rejected": 0,
+  "memory_audit_events": {
+    "write": 39,
+    "retrieve": 11,
+    "retract": 2
+  },
+  "tokens_per_case": 8288.4,
+  "total_tokens": 99461,
+  "calls_per_case": 12.83,
+  "latency_s_per_case": 7.88,
+  "timeout_rate": 0.0,
+  "error_rate": 0.0
+}

@@ -1,0 +1,9 @@
+memory,condition,runs,n,accuracy_mean,accuracy_std,lessons_admitted_mean,lessons_admitted_std,cases_retrieving_a_wrong_lesson_mean,cases_retrieving_a_wrong_lesson_std,entries_active_at_end_mean,entries_active_at_end_std,entries_retracted_mean,entries_retracted_std,tokens_per_case_mean,tokens_per_case_std,error_rate_mean,error_rate_std
+ungated,clean,1,12,0.5833,0.0,0,0.0,1,0.0,37,0.0,2,0.0,8288.4,0.0,0.0,0.0
+ungated,poisoned,1,12,0.5833,0.0,10,0.0,10,0.0,46,0.0,3,0.0,8708.4,0.0,0.0,0.0
+gated,clean,1,12,0.5,0.0,0,0.0,0,0.0,30,0.0,2,0.0,7877.7,0.0,0.0,0.0
+gated,poisoned,1,12,0.6667,0.0,0,0.0,0,0.0,36,0.0,0,0.0,7535.2,0.0,0.0,0.0
+
+memory,accuracy_clean,accuracy_poisoned,drop_points,hypothesis_threshold,meets_hypothesis
+ungated,0.5833,0.5833,0.0,>=5,False
+gated,0.5,0.6667,-16.67,<=2,True
