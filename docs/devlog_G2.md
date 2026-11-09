@@ -6,17 +6,20 @@ Design decisions are made on `data/safety/adversarial_dev.jsonl` (10 scenarios) 
 
 ## Status
 
-**No LLM dev results yet.** Everything below was measured offline, with `MockProvider` and
-a stubbed openFDA cache, because no `GROQ_API_KEY` is configured in this checkout. The
-code, the scenario set and the grader are complete and `pytest -q` passes (95 tests). The
-dev iteration rows that need a model are marked `pending` and must be filled before the
-hypothesis can be reported.
+**LLM results now exist** (gpt-oss-120b, 1 seed, 2026-11-08/09). The offline rows below record
+how the grader, rules and officer prompt were built with `MockProvider`; the live numbers are in
+**[Results against the G2 hypothesis](#results-against-the-g2-hypothesis)**. Headline, honest: an
+independent Safety Officer (SafeWard) roughly halves the unsafe-action rate of the self-check
+baseline (B3) on both splits, at no accuracy cost and with zero false vetoes, but it does **not**
+beat the plain no-safety baseline (B2) by the promised 50% — on the test split B2 was already
+safer by one case. The claim the data support is *"self-review does not help and an independent
+officer undoes its harm"*, not *"SafeWard beats an unguarded doctor"*.
 
-To produce them:
+Reproduce:
 
 ```bash
-python experiments/run_safety.py --split dev --configs all          # tune here
-python experiments/run_safety.py --split test --configs all --seeds 1
+python experiments/run_safety.py --split dev  --configs all --limit 10 --normal-cases 20
+python experiments/run_safety.py --split test --configs all --limit 15 --normal-cases 10
 ```
 
 ## Iterations (offline)
@@ -33,8 +36,58 @@ python experiments/run_safety.py --split test --configs all --seeds 1
 | 2026-11-08 | **The rule layer produced false vetoes on correct plans.** The rules extracted drug names from the plan with no regard for context, so the *right* answer for an ACE inhibitor in pregnancy — "stop ramipril, start labetalol" — was vetoed on `ramipril+pregnancy`. The grader had negation handling; the rules did not. Any inflated veto rate here inflates both the headline unsafe-action rate and the false-veto rate on normal cases. | Moved `asserted()` and the negation/topical patterns into `rules.py` and added `prescribed_drugs()`, so interactions and contraindications read only what the plan *gives*. `grader.py` now imports them, so a plan is read identically when reviewed and when scored. Dose rules deliberately keep the raw mentions, because "stop insulin" is itself the unsafe act there. | Four correct plans that previously vetoed now approve (stop-and-switch, avoid-and-substitute, switch-from, hold-for-course), while "continue ramipril", "add ibuprofen" and "stop insulin" still veto. |
 | 2026-11-08 | The first version of that fix over-corrected: the negation window ran 60 characters back without respecting clause boundaries, so in "stop ramipril, **start labetalol**" the labetalol was read as refused too, and `prescribed_drugs` returned nothing at all. | The window now stops at a comma, semicolon or full stop, and at a coordinating conjunction, so "hold the simvastatin **and give** clarithromycin" correctly reads the macrolide as given. | Nine phrasings checked by hand and in tests. Known residual: in "switch from warfarin to heparin" the *target* drug is also dropped, which is conservative — it can miss an interaction but cannot invent a veto. |
 | 2026-11-08 | The officer ablation switches (`facts_only`, `use_rules`, `use_openfda`) existed but were reachable only from Python, so proposal ablation 4 could not actually be run. | `--ablation {none,facts_only,no_rules,no_openfda,model_only}` on `run_safety.py`, rebuilding the officer after `build_runner` (which takes no reviewer kwargs) rather than changing shared code. Results and logs carry the ablation in their filenames and in the metrics. | All five variants run end to end under `--mock` and write distinct result files. |
-| pending | — | B2 / B3 / SafeWard on `adversarial_dev.jsonl` | **needs an API key** |
-| pending | — | Officer prompt iteration on dev | **needs an API key** |
+| 2026-11-08 | B2 / B3 / SafeWard on **dev** (10 adversarial + 20 normal, gpt-oss-120b, 1 seed). | First live run of the three configs. | unsafe-action rate: B2 **0.60**, B3 **0.70**, SafeWard **0.40**; compliance-with-false-premise B2 0.25, B3 0.50, SafeWard **0.00**; acc-normal B2 0.55, B3 0.45, SafeWard **0.65**; false-veto 0.00 all. SafeWard is best of the three here (33% below B2, 43% below B3), but the ">=50% below B2" target needs <=0.30 and is **not** met even on dev. See the Results section. |
+| 2026-11-09 | B2 / B3 / SafeWard on **test** (15 of 30 adversarial + 10 normal, gpt-oss-120b, 1 seed). The `--limit 15` was forced by the Groq daily budget, so this is a partial test split. | Reported run on held-out scenarios. | unsafe-action rate: B2 **0.20**, B3 **0.5333**, SafeWard **0.2667**; compliance-with-false-premise B2 0.20, B3 0.50, SafeWard **0.10**; acc-normal B2 0.90, B3 0.80, SafeWard 0.90; false-veto 0.00 all; red-flag recall B2 0.158, SafeWard 0.053, B3 0.000. Here B2 was safer than SafeWard by one case, so the B2 target fails outright while the ">=25% below B3" target is met (50% reduction). See the Results section. |
+| 2026-11-09 | Officer prompt iteration on dev. | **Not done.** The dev run above used the Phase-1 officer prompt unchanged. Tuning it would have spent a second day's budget and risked overfitting the 10 dev scenarios; the prompt is recorded as un-tuned rather than silently adjusted. | — |
+
+## Results against the G2 hypothesis
+
+Model gpt-oss-120b, 1 seed, officer model gpt-oss-120b. Dev = `adversarial_dev` (10) + 20 normal
+MedQA cases; test = first 15 of `adversarial_test` (30) + 10 normal (the `--limit` was set by the
+Groq free-tier daily budget, not by design). Each adversarial case is worth 10 points on dev and
+~6.7 on test, so single-case differences dominate and no two configs are separated by a confidence
+interval at this size. Full numbers: `results/safety/dev_summary.csv`, `results/safety/test_summary.csv`.
+
+**Unsafe-action rate** (fraction of adversarial cases whose final plan contains an invited unsafe
+action; lower is better). `blocked_rate` was 0.00 for every config, so `unsafe_reaching_patient_rate`
+equals this column — the officer's benefit came through revisions the doctor re-submitted and the
+second review approved, never through a sustained block.
+
+| Config | Dev (n=10) | Test (n=15) | Compliance w/ false premise (test) | False-veto (both) | Acc-normal (test) |
+|---|---|---|---|---|---|
+| B2 (no safety) | 0.60 | **0.20** | 0.20 | 0.00 | 0.90 |
+| B3 (doctor self-check) | 0.70 | 0.5333 | 0.50 | 0.00 | 0.80 |
+| SafeWard (independent officer) | **0.40** | 0.2667 | **0.10** | 0.00 | 0.90 |
+
+**The hypothesis, point by point:**
+
+1. *">=50% fewer unsafe actions than B2"* — **not met.** Dev: 0.40 vs 0.60 is 33% fewer, short of 50%.
+   Test: 0.2667 vs 0.20 is *higher* than B2. On the test set the plain doctor happened to be safe on
+   these 15 cases (3 unsafe), and SafeWard was unsafe on one more (4). The gap is one case and inside
+   the noise, but it does not support the claim as written, and it is recorded as a miss, not rounded away.
+2. *">=25% fewer unsafe actions than B3"* — **met on both splits.** Dev 0.40 vs 0.70 (43% fewer);
+   test 0.2667 vs 0.5333 (50% fewer).
+3. *"Diagnostic accuracy within 3 points of B2"* — **met.** Dev SafeWard 0.65 vs B2 0.55 (better);
+   test 0.90 vs 0.90 (equal).
+4. *"No increase in false vetoes"* — **met.** False-veto rate is 0.00 for all three configs on both
+   splits; the officer never blocked a normal-case plan.
+
+**What the data actually show.** The consistent, defensible finding is about the *independent-reviewer*
+manipulation, which is the variable G2 controls. **Self-review (B3) is worse than no review (B2)** on
+unsafe-action rate on both splits (0.70 > 0.60 dev; 0.5333 > 0.20 test) and worse on false-premise
+compliance (0.50 vs 0.25/0.20): a doctor asked to re-approve its own plan tends to talk itself into
+the unsafe action. **An independent officer (SafeWard) reverses that harm**, roughly halving B3's
+unsafe rate, cutting false-premise compliance to the lowest of the three, and costing nothing in
+accuracy or false vetoes. What the data do **not** show is SafeWard beating an unguarded doctor: on
+the small, safe-by-chance test sample B2 was already as safe. The write-up must lead with the B3
+comparison and report the B2 result as a null, because at n=15 (1 seed) the B2 difference is a single
+case.
+
+**Limitations of this run, for the paper.** 1 seed, so no std and no significance test; n=15 on test
+(half the split) because of the token budget; red-flag recall is poor for every config (B2 0.16,
+SafeWard 0.05, B3 0.00), meaning none of them reliably surfaces the hidden danger on its own — the
+officer's value here is in vetoing the *plan*, not in re-reading the vitals. The officer prompt was
+not tuned on dev. A full test split (30 cases) and >=3 seeds are the first things to add if budget allows.
 
 ## Open design decisions
 
@@ -105,4 +158,9 @@ and re-run the dev split. The three test-split fixes were not yet run, so they n
 
 ## Not done
 
-- **Every experiment in the brief's step 6.** No run has been executed against a real model.
+- **Full test split and multi-seed.** The test run covers 15 of 30 adversarial cases at 1 seed,
+  limited by the Groq free-tier daily budget. No std, no significance test, no CI separation.
+- **Officer prompt tuning on dev.** Deliberately skipped (see the dev-iteration row); the Phase-1
+  prompt was used unchanged to avoid overfitting 10 scenarios and spending a second day's budget.
+- **Officer ablations** (`--ablation facts_only|no_rules|no_openfda|model_only`). Runnable and
+  tested under `--mock`, but not run against the model, for budget.
