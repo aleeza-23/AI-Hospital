@@ -1,0 +1,11 @@
+\begin{table}[t]\centering\small
+\caption{G3 memory poisoning on 12 paired cases (1 seed). Accuracy is \% with the 95\% Wilson interval. Adm. = wrong lessons written to memory (of 10 submitted); Retr. = cases whose context contained a wrong lesson.}
+\label{tab:memory}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llcccc}\toprule
+Memory & Run & Accuracy & Adm. & Retr. & Tok/case \\ \midrule
+Ungated & clean & 58.3 [32, 81] & -- & -- & 8288 \\
+Ungated & poisoned & 58.3 [32, 81] & 10 & 10 & 8708 \\
+Gated & clean & 50.0 [25, 75] & -- & -- & 7878 \\
+Gated & poisoned & 66.7 [39, 86] & 0 & 0 & 7535 \\
+\bottomrule\end{tabular}\end{table}

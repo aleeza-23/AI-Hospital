@@ -9,17 +9,18 @@ from __future__ import annotations
 
 import csv
 import json
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RES, OUT = ROOT / "results", ROOT / "results" / "tables"
 
 TRIAGE_ROWS = [
-    ("human", "Human nurse (KTAS\\_RN)"),
+    ("human", "Human nurse"),
     ("rules", "B1 Rules"),
     ("single_llm", "B0 Single LLM"),
-    ("nurse", "Triage Nurse (no floor)"),
-    ("nurse_floor", "\\textbf{SafeWard G1} (nurse + floor)"),
+    ("nurse", "Nurse, no floor"),
+    ("nurse_floor", "\\textbf{Nurse + floor}"),
 ]
 
 
@@ -28,12 +29,17 @@ def read_csv(p: Path) -> dict[str, dict]:
         return {r.get("method") or r.get("config"): r for r in csv.DictReader(f)}
 
 
+def pct1(v: float) -> str:
+    """Percent to 1 decimal, rounding halves up (summary.csv values are already rounded to 4 places)."""
+    return str((Decimal(str(v)) * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+
+
 def cell(r: dict, k: str, pct=False, nd=3) -> str:
     v = float(r[f"{k}_mean"])
     s = float(r.get(f"{k}_std", 0) or 0)
-    txt = f"{100*v:.1f}" if pct else f"{v:.{nd}f}"
+    txt = pct1(v) if pct else f"{v:.{nd}f}"
     if s > 0:
-        txt += f"$\\pm${100*s:.1f}" if pct else f"$\\pm${s:.{nd}f}"
+        txt += f"$\\pm${pct1(s)}" if pct else f"$\\pm${s:.{nd}f}"
     return txt
 
 
@@ -47,11 +53,12 @@ def triage_table() -> str | None:
     seeds = max(int(r["runs"]) for r in rows.values())
     lines = [
         "\\begin{table}[t]\\centering\\small",
-        f"\\caption{{G1 triage on the KTAS test split ($n={n}$, {seeds} seed{'s' if seeds > 1 else ''}). "
-        "UT = under-triage rate (\\%); UT$_{1\\text{-}2}$ restricted to KTAS 1--2. "
-        "Wait = mean simulated wait of KTAS 1--2 patients (min).}",
+        f"\\caption{{G1 triage on the KTAS test split ($n={n}$). LLM methods show the mean$\\pm$SD of {seeds} runs; "
+        "the human labels and B1 are deterministic. UT = under-triage rate (\\%); UT$_{1\\text{-}2}$ restricted to "
+        "KTAS 1--2. Wait = mean simulated wait of KTAS 1--2 patients (min).}",
         "\\label{tab:triage}",
-        "\\setlength{\\tabcolsep}{3pt}",
+        "\\setlength{\\tabcolsep}{2.5pt}",
+        "\\resizebox{\\columnwidth}{!}{%",
         "\\begin{tabular}{lcccccc}\\toprule",
         "Method & Acc & QWK & UT & UT$_{1\\text{-}2}$ & Tok/case & Wait \\\\ \\midrule",
     ]
@@ -67,8 +74,8 @@ def triage_table() -> str | None:
         ]) + " \\\\")
     lines += [
         "\\midrule",
-        f"FIFO queue (MedAgentSim, no triage) & -- & -- & -- & -- & -- & {fifo['mean_wait_high_acuity_min']:.1f} \\\\",
-        "\\bottomrule\\end{tabular}\\end{table}",
+        f"Arrival order & -- & -- & -- & -- & -- & {fifo['mean_wait_high_acuity_min']:.1f} \\\\",
+        "\\bottomrule\\end{tabular}}\\end{table}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -93,13 +100,71 @@ def generic_table(sub: str, name: str, caption: str) -> str | None:
     ]) + "\n"
 
 
+def safety_table() -> str | None:
+    rows = [("safety_b2", "B2 No review"), ("safety_b3", "B3 Self-review"), ("safety_safeward", "\\textbf{SafeWard} Officer")]
+    paths = {k: RES / "safety" / f"{k}_test_seed0.json" for k, _ in rows}
+    if not all(p.exists() for p in paths.values()):
+        return None
+    data = {k: json.loads(p.read_text(encoding="utf-8")) for k, p in paths.items()}
+    n, n_norm = data["safety_b2"]["n"], data["safety_b2"]["n_normal"]
+    lines = [
+        "\\begin{table}[t]\\centering\\small",
+        f"\\caption{{G2 safety review on {n} adversarial test scenarios and {n_norm} normal cases (1 seed). "
+        "Rates are \\%; brackets give the 95\\% Wilson interval. FP = false-premise compliance, "
+        "HRF = unsafe plans on hidden-red-flag scenarios, Dx = diagnostic accuracy on normal cases.}",
+        "\\label{tab:safety}",
+        "\\setlength{\\tabcolsep}{2.5pt}",
+        "\\begin{tabular}{lccccc}\\toprule",
+        "Config & Unsafe & FP & HRF & Dx & Tok/case \\\\ \\midrule",
+    ]
+    for key, label in rows:
+        r = data[key]
+        lo, hi = r["unsafe_action_rate_ci95"]
+        lines.append(" & ".join([
+            label, f"{100*r['unsafe_action_rate']:.1f} [{100*lo:.0f}, {100*hi:.0f}]",
+            f"{100*r['compliance_rate_false_premise']:.0f}", f"{100*r['unsafe_action_rate_hidden_red_flag']:.0f}",
+            f"{100*r['diagnostic_accuracy_normal']:.0f}", f"{r['tokens_per_case']:.0f}",
+        ]) + " \\\\")
+    lines.append("\\bottomrule\\end{tabular}\\end{table}")
+    return "\n".join(lines) + "\n"
+
+
+def memory_table() -> str | None:
+    arms = [("ungated", "clean"), ("ungated", "poisoned"), ("gated", "clean"), ("gated", "poisoned")]
+    paths = {a: RES / "memory" / f"{a[0]}_{a[1]}_seed0.json" for a in arms}
+    if not all(p.exists() for p in paths.values()):
+        return None
+    d = {a: json.loads(p.read_text(encoding="utf-8")) for a, p in paths.items()}
+    n = d[arms[0]]["n"]
+    lines = [
+        "\\begin{table}[t]\\centering\\small",
+        f"\\caption{{G3 memory poisoning on {n} paired cases (1 seed). Accuracy is \\% with the 95\\% Wilson "
+        "interval. Adm. = wrong lessons written to memory (of 10 submitted); Retr. = cases whose "
+        "context contained a wrong lesson.}",
+        "\\label{tab:memory}",
+        "\\setlength{\\tabcolsep}{3pt}",
+        "\\begin{tabular}{llcccc}\\toprule",
+        "Memory & Run & Accuracy & Adm. & Retr. & Tok/case \\\\ \\midrule",
+    ]
+    for a in arms:
+        r = d[a]
+        lo, hi = r["accuracy_ci95"]
+        admitted = str(r["lessons_admitted"]) if a[1] == "poisoned" else "--"
+        lines.append(" & ".join([
+            a[0].capitalize(), a[1], f"{100*r['accuracy']:.1f} [{100*lo:.0f}, {100*hi:.0f}]", admitted,
+            str(r["cases_retrieving_a_wrong_lesson"]) if a[1] == "poisoned" else "--", f"{r['tokens_per_case']:.0f}",
+        ]) + " \\\\")
+    lines.append("\\bottomrule\\end{tabular}\\end{table}")
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     jobs = {
         "triage": triage_table,
-        "safety": lambda: generic_table("safety", "safety", "G2 safety on the adversarial test set."),
-        "memory": lambda: generic_table("memory", "memory", "G3 memory poisoning (clean vs poisoned)."),
-        "consultation": lambda: generic_table("consultation", "consultation", "Consultation accuracy on MedQA."),
+        "safety": safety_table,
+        "memory": memory_table,
+        # consultation: tab:base in paper/main.tex is written by hand (it mixes reported and measured rows)
     }
     for name, fn in jobs.items():
         tex = fn()

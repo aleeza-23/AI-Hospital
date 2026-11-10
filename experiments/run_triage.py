@@ -2,6 +2,7 @@
 
     python experiments/run_triage.py --split dev  --methods nurse          # iterate on dev only
     python experiments/run_triage.py --split test --methods all --seeds 3  # reported numbers
+    python experiments/run_triage.py --split test --methods single_llm nurse nurse_floor --seeds 2 --start-seed 1  # extra repeats
 
 Methods:
   human        real triage nurse's KTAS_RN label (free, from the dataset)
@@ -53,9 +54,28 @@ def apply_rule_floor(d: TriageDecision, case) -> TriageDecision:
     return d
 
 
-def run_method(method, cases, providers) -> list[TriageDecision]:
+class QuotaStop(RuntimeError):
+    """The API refused a case for a transient reason (quota, timeout); stop rather than score it."""
+
+
+TRANSIENT = ("RateLimit", "429", "Timeout", "APIConnection", "InternalServer", "503", "502")
+
+
+def run_method(method, cases, providers, ckpt: Path | None = None) -> list[TriageDecision]:
+    """Run one method. LLM runs append to `ckpt` after every case, so a run stopped by the
+    daily quota resumes where it left off; a transient API error stops the run instead of
+    being recorded as a failure, which would silently score the case as level 3."""
+    done: dict[str, TriageDecision] = {}
+    if ckpt and ckpt.exists():
+        for line in ckpt.read_text(encoding="utf-8").splitlines():
+            d = TriageDecision.model_validate_json(line)
+            done[d.case_id] = d
+        print(f"  resuming {method}: {len(done)} cases already done", flush=True)
     out = []
     for c in cases:
+        if c.id in done:
+            out.append(done[c.id])
+            continue
         if method == "human":
             d = TriageDecision(case_id=c.id, method="human", level=c.ktas_nurse)
         elif method == "rules":
@@ -65,6 +85,11 @@ def run_method(method, cases, providers) -> list[TriageDecision]:
             d = single_llm_triage(providers["triage_nurse"], c)
         else:
             d = TriageNurse(providers["triage_nurse"], providers["patient"]).triage(c)
+        if d.error and any(t in d.error for t in TRANSIENT):
+            raise QuotaStop(f"{c.id}: {d.error[:200]}")
+        if ckpt:
+            with open(ckpt, "a", encoding="utf-8") as f:
+                print(d.model_dump_json(), file=f)
         out.append(d)
         print(f"  [{method}] {c.id} expert={c.ktas_expert} pred={d.level} {d.error or ''}", flush=True)
     return out
@@ -112,6 +137,8 @@ def main() -> None:
     ap.add_argument("--split", choices=["dev", "test"], default="dev")
     ap.add_argument("--methods", nargs="+", default=["all"])
     ap.add_argument("--seeds", type=int, default=1)
+    ap.add_argument("--start-seed", type=int, default=0,
+                    help="first run index, so extra repeats do not overwrite earlier runs")
     ap.add_argument("--providers", default="experiments/configs/providers_groq.yaml")
     ap.add_argument("--data", default="data/ktas/ktas_moon2019.csv")
     ap.add_argument("--limit", type=int)
@@ -136,10 +163,16 @@ def main() -> None:
     if want_floor and "nurse" not in run_list:
         run_list.append("nurse")
     for method in run_list:
-        for seed in range(args.seeds if method in LLM_METHODS else 1):
+        for seed in (range(args.start_seed, args.start_seed + args.seeds) if method in LLM_METHODS else [0]):
             print(f"-- {args.split} {method} seed{seed} ({len(cases)} cases)")
-            decisions = run_method(method, cases, providers)
+            ckpt = log_dir / f"{args.split}_{method}_seed{seed}.partial.jsonl" if method in LLM_METHODS else None
+            try:
+                decisions = run_method(method, cases, providers, ckpt)
+            except QuotaStop as e:
+                sys.exit(f"STOPPED, re-run the same command to resume ({ckpt.name}): {e}")
             write_run(method, seed, decisions, cases, args.split, res_dir, log_dir)
+            if ckpt:
+                ckpt.unlink(missing_ok=True)
             if method == "nurse" and want_floor:
                 floored = [apply_rule_floor(d.model_copy(deep=True), c) for d, c in zip(decisions, cases)]
                 for d in floored:

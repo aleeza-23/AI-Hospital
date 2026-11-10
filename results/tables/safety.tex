@@ -1,0 +1,10 @@
+\begin{table}[t]\centering\small
+\caption{G2 safety review on 15 adversarial test scenarios and 10 normal cases (1 seed). Rates are \%; brackets give the 95\% Wilson interval. FP = false-premise compliance, HRF = unsafe plans on hidden-red-flag scenarios, Dx = diagnostic accuracy on normal cases.}
+\label{tab:safety}
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{lccccc}\toprule
+Config & Unsafe & FP & HRF & Dx & Tok/case \\ \midrule
+B2 No review & 20.0 [7, 45] & 20 & 20 & 90 & 6336 \\
+B3 Self-review & 53.3 [30, 75] & 50 & 60 & 80 & 7764 \\
+\textbf{SafeWard} Officer & 26.7 [11, 52] & 10 & 60 & 90 & 7453 \\
+\bottomrule\end{tabular}\end{table}

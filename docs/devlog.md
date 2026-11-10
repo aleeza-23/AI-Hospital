@@ -38,3 +38,25 @@ Run once on the held-out test split after all dev tuning was frozen. `python exp
 - H1 fails for the unguarded agent: the interview-only nurse under-triages more than B0 (0.608). The rule floor overrode 25/141 decisions; the gain comes from the rule floor, not from the interview.
 - The rule floor's advantage over rules alone is not significant (diff 0.02, CI [0.0, 0.059]). Rules alone have higher accuracy (0.596 vs 0.546).
 - Limitation: 1 seed only (free-tier budget); CIs are case bootstrap, not seed variance.
+
+### 2026-11-10: G1 repeat run (seed 1), nurse and nurse + floor
+Second complete run of the LLM methods on the same frozen test split, so B0, the nurse and the guarded nurse now have two runs each. No failed cases (141/141 for each). `--start-seed 1` and a per-case checkpoint were added to `run_triage.py` after the free-tier daily limit stopped the run partway.
+
+| Method | Acc (run 1 / run 2) | QWK (run 1 / run 2) | Under-triage KTAS 1–2 (run 1 / run 2) |
+|---|---|---|---|
+| B0 single LLM | 0.461 / 0.504 | 0.720 / 0.746 | 24/51 / 19/51 |
+| Triage Nurse agent | 0.397 / 0.418 | 0.660 / 0.690 | 31/51 / 31/51 |
+| Nurse + rule floor | 0.546 / 0.560 | 0.752 / 0.772 | 10/51 / 10/51 |
+
+- H1 holds in both runs for the guarded agent: relative reduction against B0 is 58% and 47%, paired bootstrap difference 27.5 points [15.7, 39.2] and 17.6 points [5.9, 31.4]. QWK beats B1 (0.734) in both.
+- The run-to-run change is mostly in B0. Nine of the ten patients the guarded agent still under-triages are the same in both runs.
+- The second run has the first correct-to-wrong floor override: `ktas-1221`, expert level 4, raised to level 2.
+- Still not significant against rules alone (2.0 points, CI [0.0, 5.9], both runs). Two runs are too few to estimate variation between runs.
+
+### 2026-11-10: Consultation E1/E2 in the paper, and a second E2 run
+The G3 member's commit 19aa524 ran E1 and E2 on the same 10 MedQA test cases (subset seed 0): E1 6/10 (60%, Wilson [31, 83]), E2 5/10 (50%, [24, 76]). A separate E2 run on 15 cases (which include those 10) was made the same day, on keys 2 and 3. It is kept in `results/consultation/repeat_n15/` and `logs/consultation/repeat_n15/` so the two runs do not overwrite each other.
+
+- The repeat reached 9/15 (60%, [36, 80]) and 7/10 on the shared cases. It differs from the first E2 run on `medqa-0056` and `medqa-0062`, which is more than the one-case E1–E2 difference. At this size, memory with chain-of-thought shows no effect either way.
+- Cold start: only 2 of 10 E2 cases (7 of 15 in the repeat) retrieved any memory entry.
+- E3 was stopped after 6 of 15 cases (quota) and is not reported. Its partial log is outside the repo, in `../consultation_local_backup/`.
+- Both runs are reported in the paper, not only the better one.
