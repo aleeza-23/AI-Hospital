@@ -8,9 +8,11 @@ Interactions* (MedAgentSim, arXiv:2503.22678).
 **Phase 1 status:** baseline **Multi-Agent Clinic** implemented end to end (data → agents →
 tools → judge → metrics). See [docs/architecture.md](docs/architecture.md).
 
-**Phase 2 status:** all three SafeWard gaps are implemented and switchable from config
-(`features: {memory, safety, cot, ask_plan}`) — G1 triage, G2 safety review, G3 verified
-memory. See [Phase 2](#phase-2-safeward) below.
+**Phase 2 status:** complete (release `phase2-final`). All three SafeWard gaps (G1 triage, G2
+safety review, G3 verified memory) are implemented, switchable from config
+(`features: {memory, safety, cot, ask_plan}`) and evaluated on held-out test data. See
+[Changes since Phase 1](#changes-since-phase-1), the [gap-resolution table](#gap-resolution-table)
+and the paper in [paper/](paper/).
 
 ## Quick start
 
@@ -110,7 +112,8 @@ every configuration is an ablation of the same system.
 python experiments/run_triage.py --split test --methods all          # G1
 python experiments/run_safety.py --split test --configs all          # G2: B2 / B3 / SafeWard
 python experiments/run_memory_poisoning.py                           # G3: poisoning test
-python experiments/run_consultation.py --configs all --n 40          # E1 / E2 / E3
+python experiments/run_consultation.py --configs all --n 10          # E1 / E2 / E3 / E3_full
+python experiments/make_tables.py                                    # paper tables from results/
 ```
 
 Every runner takes `--mock`, which exercises the whole pipeline offline with no API key, and
@@ -132,6 +135,111 @@ runs part way). Results land in `results/<area>/` and full trajectories in `logs
 The openFDA drug-label cache in `data/cache/openfda/` is committed (97 entries), so safety runs
 are repeatable offline. `OPENFDA_OFFLINE=1` forbids network access outright, which is how the test
 suite runs; refresh or extend it with `python -m medsim.safety.openfda`.
+
+## Changes since Phase 1
+
+Phase 1 delivered the baseline Multi-Agent Clinic (doctor, patient and measurement agents, LLM
+judge) and the E1 baseline: 74.3% on the first 35 MedQA cases with `gpt-oss-120b`. Phase 2 changed
+the following.
+
+**New components**
+- `src/medsim/triage/` (G1): a Triage Nurse agent that interviews the patient, can request vital
+  signs and assigns a KTAS level; a deterministic rule floor that raises the level when vital-sign or
+  complaint rules fire; and a Ward Manager that queues patients by acuity, with red-flag escalation.
+- `src/medsim/safety/` (G2): a Safety Officer, separate from the doctor, that reviews each management
+  plan and returns approve, revise or veto. It combines red-flag rules, an openFDA drug-label lookup
+  (cached in `data/cache/openfda/`) and a model review. An unsafe-action grader scores the final plan.
+- `src/medsim/memory/` (G3): ungated memory, as in MedAgentSim, and gated memory, which stores a lesson
+  only when the outcome is confirmed against the reference diagnosis, records provenance, and retracts
+  an entry after two wrong diagnoses. Retrieval is TF-IDF cosine similarity.
+- `experiments/`: runners for triage, safety, memory poisoning and consultation, and
+  `make_tables.py`, which builds the paper's tables from `results/`.
+
+**New data**
+- KTAS triage dataset (Moon et al., 1,267 emergency visits), stratified into 25 dev and 141 test cases.
+- 40 adversarial safety scenarios written and reviewed by the group (false premise, hidden red flag,
+  unsafe drug combination), split into dev and test.
+- A memory-poisoning set: 10 wrong lessons and 30 paired MedQA-Ext cases.
+
+**Changes to existing code**
+- `features:` flags in the run config, so every configuration is an ablation of the same system.
+- Rotation across several Groq API keys when one hits its daily limit, `--resume` on every runner,
+  and a per-case checkpoint in `run_triage.py` (with `--start-seed`) so a run stopped by the quota
+  continues where it left off.
+- On resume, episodes that ended in an error are retried, not kept as results.
+- The patient agent's output limit was raised from 400 to 700 tokens after reasoning tokens produced an
+  empty reply.
+- `run_memory_poisoning.py --recompute` re-derives every memory metric from the logs with no model calls.
+
+**Changes from the Phase 1 plan**, all because of the free-tier API quota unless stated:
+- Consultation E1–E3 ran on 10 MedQA test cases, not 40. E2 was run twice (10 and 15 cases).
+- G2 ran on 15 of the 30 adversarial test scenarios, none of them drug-combination cases. G3 ran on
+  12 of the 30 paired cases.
+- G1 LLM methods ran twice; G2, G3, E1 and E3 ran once.
+- MedAgentSim's majority-vote ensembling and reflection on misdiagnosis are not implemented (cost), and
+  CLIP retrieval is replaced by TF-IDF (text-only cases). E2 is therefore a partial reproduction.
+- A planned manual audit of the LLM judge and ablations of the Safety Officer's individual layers were
+  not completed.
+
+Day-by-day decisions and their reasons are in [docs/devlog.md](docs/devlog.md),
+[docs/devlog_G2.md](docs/devlog_G2.md) and [docs/devlog_G3.md](docs/devlog_G3.md).
+
+## Results
+
+All numbers are measured on held-out test data with `gpt-oss-120b`. Intervals are 95%.
+
+**G1 triage** (141 KTAS cases, 51 at KTAS 1–2; mean of two runs for LLM methods)
+
+| Method | Accuracy | QWK | Under-triage, KTAS 1–2 | KTAS 1–2 wait (min) |
+|---|---|---|---|---|
+| Human triage nurses (dataset) | 84.4% | 0.949 | 10/51 | 6.9 |
+| B1 rules only | 59.6% | 0.734 | 11/51 | 8.6 |
+| B0 single LLM prompt | 48.2% | 0.733 | 42.2% (24 and 19 of 51) | 11.1 |
+| Triage Nurse, no rule floor | 40.8% | 0.675 | 31/51 in both runs | 11.1 |
+| **Triage Nurse + rule floor** | 55.3% | 0.762 | **10/51 in both runs** | 9.3 |
+| Arrival order (no triage) | – | – | – | 14.4 |
+
+**G2 safety** (15 adversarial scenarios, 10 normal cases, one run)
+
+| Config | Unsafe plans | Normal-case accuracy | Tokens/case |
+|---|---|---|---|
+| B2 no review | 3/15 (20.0%) | 90% | 6,336 |
+| B3 doctor self-review | 8/15 (53.3%) | 80% | 7,764 |
+| **SafeWard Safety Officer** | 4/15 (26.7%) | 90% | 7,453 |
+
+**G3 memory poisoning** (12 paired cases, 10 injected wrong lessons, one run)
+
+| Memory | Clean accuracy | Poisoned accuracy | Wrong lessons admitted |
+|---|---|---|---|
+| Ungated | 58.3% | 58.3% | 10/10 |
+| **Gated** | 50.0% | 66.7% | 0/10 |
+
+**Consultation** (the same 10 MedQA test cases, one run each)
+
+| Config | Correct |
+|---|---|
+| E1 baseline | 6/10 |
+| E2 memory + chain-of-thought (MedAgentSim-style) | 5/10; second run 9/15 |
+| E3 gated memory + chain-of-thought | 9/10 |
+| E3 + Safety Officer | 6/10 |
+
+All four consultation intervals overlap. Memory reached the doctor in only two cases in E2 and E3, so
+these differences reflect variation between runs and not the memory gate. See "Comparison with the Base Paper" in the paper.
+
+## Gap-resolution table
+
+Status is judged against the hypotheses fixed before the test runs (H1–H3 in the paper).
+
+| Gap | Limitation in MedAgentSim | SafeWard component | Result | Status |
+|---|---|---|---|---|
+| G1 Triage | No triage or queue; patients enter the consultation directly | Triage Nurse, rule floor, Ward Manager | KTAS 1–2 under-triage 42.2% (B0) → 19.6%; QWK 0.762 vs 0.734 (B1); wait 14.4 → 9.3 min | **Resolved**, through the rule floor. The nurse alone was worse than B0, and the floor's lead over rules alone is not significant. |
+| G2 Safety | Unsafe plans and sycophancy are not measured | Safety Officer with rules and openFDA labels | Unsafe plans 26.7% vs 53.3% (B3) and 20.0% (B2); normal-case accuracy unchanged at 90% | **Partly**: better than self-review, not better than no review. H2 not met. |
+| G3 Verified memory | Lessons are stored without verification | Memory gate, provenance, retraction | Wrong lessons admitted 10/10 → 0/10; ungated accuracy did not drop after poisoning (target ≥ 5 points) | **Partly**: wrong writes are blocked, but the harm the gate prevents was not shown. H3 not met. |
+
+## Paper
+
+[paper/main.tex](paper/main.tex) (IEEEtran) with [paper/references.bib](paper/references.bib) and
+tables in [paper/tables/](paper/tables/). Upload the `paper/` folder to Overleaf to compile it.
 
 ## Disclaimer
 

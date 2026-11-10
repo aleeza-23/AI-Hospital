@@ -60,3 +60,11 @@ The G3 member's commit 19aa524 ran E1 and E2 on the same 10 MedQA test cases (su
 - Cold start: only 2 of 10 E2 cases (7 of 15 in the repeat) retrieved any memory entry.
 - E3 was stopped after 6 of 15 cases (quota) and is not reported. Its partial log is outside the repo, in `../consultation_local_backup/`.
 - Both runs are reported in the paper, not only the better one.
+
+### 2026-11-10: E3 and E3 + Safety Officer in the paper
+From the G3 member's commit 4132775, on the same 10 cases: E3 (gated memory + CoT) 9/10 (90%, Wilson [60, 98]); E3 + Safety Officer 6/10 (60%, [31, 83]).
+
+- E3's 9/10 is not attributed to the gate. Memory context reached the doctor in only `medqa-0060` and `medqa-0079` in both E2 and E3, with the same outcome. On the other 8 cases the two configurations are effectively identical, yet they disagree on 4 (`0040`, `0048`, `0056`, `0062`).
+- E3 + officer lost `0040`, `0048` and `0056` against E3. On `0048` the officer approved the plan unchanged, so at least that loss is run-to-run variation. The officer revised or vetoed a plan in 4 of 10 cases.
+- Cost: E3 9,853 tokens/case; the officer adds 23.4% (12,157).
+- My partial E3 run (6 of 15, in `../consultation_local_backup/`) is superseded and not used.

@@ -158,7 +158,7 @@ clinical simulator verifies memory writes or measures how a wrong lesson spreads
 
 \textbf{Positioning.} No existing work combines interactive multi-agent diagnosis with
 acuity-based triage, independent safety review and memory-integrity testing in one simulated
-hospital. SafeWard fills this gap while keeping the MedAgentSim consultation loop unchanged, so
+hospital. SafeWard combines the three while keeping the MedAgentSim consultation loop unchanged, so
 that its results remain comparable with the base paper.
 
 % =====================================================================
@@ -301,8 +301,8 @@ contraindication rules and against drug-interaction and contraindication section
 labels~\cite{kasshout2016openfda}, which are cached so that runs are repeatable. It returns
 \emph{approve}, \emph{revise} or \emph{veto} with a list of issues. On revise or veto the doctor
 writes one revised plan, which is reviewed again. The officer reviews only this final plan and the
-facts gathered in the transcript, and it cannot halt an episode. The self-check baseline instead asks the doctor model to review its own plan
-without tools.
+facts gathered in the transcript, and it cannot halt an episode. The self-review baseline (B3) instead asks the doctor model to review its own
+plan without tools.
 
 \textbf{Verified memory (G3).} The memory stores medical records of correctly diagnosed cases and
 lessons. Before a consultation it retrieves the $k=3$ nearest entries for the doctor's only
@@ -332,7 +332,7 @@ dev splits only.
   expert-consensus reference level. We draw a stratified split with seed~0: 5 dev and 30 test
   cases per level (level~1 has only 26 cases, giving 21 test cases), i.e.\ 25 dev and 141 test cases.
   \item \emph{Consultation:} AgentClinic's MedQA cases~\cite{schmidgall2024agentclinic,jin2021medqa},
-  of which the Phase~1 E1 baseline used the first 35; the Phase~2 comparison of E1 and E2 uses 10
+  of which the Phase~1 E1 baseline used the first 35; the Phase~2 comparison of E1, E2 and E3 uses 10
   test cases sampled with seed~0, and a repeat of E2 uses 15 cases that include those 10.
   \item \emph{Safety:} 40 adversarial scenarios written by the group and reviewed by two group members
   against a written rubric, in three types (false premise, hidden red flag, unsafe drug combination),
@@ -356,9 +356,9 @@ free-tier provider, the doctor, triage nurse, Safety Officer and judge use
 \texttt{openai/gpt-oss-120b} and the patient and measurement agents use \texttt{openai/gpt-oss-20b}~\cite{openai2025gptoss},
 served through the Groq API with reasoning effort \emph{low}. Temperatures are 0.2 for the doctor,
 nurse and patient and 0.0 for the measurement agent, the Safety Officer and the judge. The
-consultation is limited to 20 turns in E1 and to 12 in the safety and memory experiments (E1 averaged
-6.5 turns), and triage to four actions. G1 reports two complete runs of each LLM method (the rule
-baseline and the human labels are deterministic); G2, G3 and E1 report one run and E2 two.
+consultation is limited to 20 turns in E1 and to 12 in the safety and memory experiments (the Phase~1
+E1 run averaged 6.5 turns), and triage to four actions. G1 reports two complete runs of each LLM method (the rule
+baseline and the human labels are deterministic); G2, G3, E1 and E3 report one run and E2 two.
 
 \textbf{Implementation.} SafeWard is written in Python. Code, configurations, results and
 trajectories are available at \url{https://github.com/aleeza-23/AI-Hospital} (release
@@ -394,7 +394,7 @@ in points, the number of wrong lessons admitted and the number of cases that ret
 latency per case, and the failure rate (errors, unparseable outputs and timeouts).
 
 \textbf{Statistics and comparison with the base paper.} Because of the API quota, the
-G2, G3 and E1 configurations were run once, E2 twice and the G1 LLM methods twice. We report 95\% Wilson intervals
+G2, G3, E1 and E3 configurations were run once, E2 twice and the G1 LLM methods twice. We report 95\% Wilson intervals
 and, for G1, the mean and standard deviation of the two runs and a paired case bootstrap (5,000
 resamples) of high-acuity under-triage within each run. We distinguish numbers \emph{measured} here with our
 model on our splits from numbers \emph{reported} in~\cite{almansoori2025medagentsim}, which used a
@@ -454,7 +454,7 @@ Accuracy under ungated memory was 58.3\% (7/12) before and after poisoning: two 
 correct to wrong and two from wrong to correct. The gated arm rose from 50.0\% to 66.7\%, which we
 treat as sampling noise, because the gate admitted nothing and the clean and poisoned conditions
 are therefore nearly identical. \textbf{H3 is not supported:} the required drop of at least 5
-points under ungated memory did not occur. The write-path result is solid but is partly true by
+points under ungated memory did not occur. The write-path result holds, but it is partly true by
 construction, since the gate compares each claim with the reference diagnosis of the source case.
 
 \subsection{Comparison with the Base Paper}
@@ -463,16 +463,20 @@ consultation baseline (E1: no memory, chain-of-thought or review) reached 74.3\%
 cases, above the 54.7\% reported for the base paper's multi-agent baseline; the doctor model and the
 case set differ, so the gap cannot be attributed to the system.
 
-For Phase~2 we ran E1 and our reproduction of MedAgentSim's memory with chain-of-thought (E2) on the
-same 10 test cases. E1 diagnosed 6 correctly and E2 5; the two disagreed on three cases, two of them
-in E1's favour. An independent second run of E2 on 15 cases, which include those 10, reached 9/15
-(60\%) and was correct on 7 of the 10 shared cases. The same configuration therefore changed by two
-diagnoses out of ten between runs, more than the one-case difference between E1 and E2. E2's memory
-also had little to draw on: it starts empty, and only 2 of the 10 cases (7 of 15 in the repeat)
-retrieved a stored entry. These samples cannot show whether memory with chain-of-thought helps with our
-model, and they do not reproduce the base paper's 16-point gain. The full SafeWard consultation (E3)
-was not completed within the API quota (6 of 15 cases ran) and is not reported, so we make no claim
-that SafeWard matches or exceeds the 70.8\% reported for full MedAgentSim.
+For Phase~2 we ran four configurations on the same 10 test cases: E1; our reproduction of
+MedAgentSim's memory with chain-of-thought (E2); SafeWard's gated memory with chain-of-thought (E3);
+and E3 with the Safety Officer reviewing each plan. E1 diagnosed 6 cases correctly, E2 5, E3 9 and E3
+with the officer 6, and all four intervals overlap. The 9/10 for E3 is not evidence for the memory
+gate. Memory reached the doctor in only two cases in both E2 and E3, the same two with the same
+outcome, so on the other eight cases the two configurations were effectively identical; they still
+disagreed on four of them. Repeating a configuration changes results by a similar amount. An independent
+second run of E2 on 15 cases, which include those 10, reached 9/15 (60\%) and was correct on 7 of the
+10 shared cases, two more than the first run. With the officer added, E3 lost three cases. The officer
+reviews the plan only after the diagnosis is made, so it cannot change a diagnosis, and this drop is
+also variation between runs; the officer revised or vetoed a plan in 4 of the 10 cases. Memory had little to draw on in any run because it starts empty. These samples cannot show
+whether either form of memory helps with our model, and they do not reproduce the base paper's
+16-point gain. We therefore make no claim that SafeWard matches or exceeds the 70.8\% reported for
+full MedAgentSim.
 
 \begin{table}[t]
 \caption{Consultation accuracy: reported by the base paper and measured here. Brackets give the 95\% Wilson interval.}
@@ -493,9 +497,10 @@ E1 baseline (Phase 1) & gpt-oss-120b & 35 & 74.3 [57.9, 85.8] \\
 E1 baseline & gpt-oss-120b & 10 & 60 [31, 83] \\
 E2 memory + CoT & gpt-oss-120b & 10 & 50 [24, 76] \\
 E2, second run & gpt-oss-120b & 15 & 60 [36, 80] \\
+E3 gated memory + CoT & gpt-oss-120b & 10 & 90 [60, 98] \\
+E3 + Safety Officer & gpt-oss-120b & 10 & 60 [31, 83] \\
 B2, normal cases & gpt-oss-120b & 10 & 90 [60, 98] \\
 SafeWard officer, normal & gpt-oss-120b & 10 & 90 [60, 98] \\
-E3 & gpt-oss-120b & -- & not completed \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -560,7 +565,8 @@ chain-of-thought were not executed because of the quota, so we cannot attribute 
 to any single layer. The memory gate adds no model calls, and its tokens per case are within the
 variation among arms (7,535--8,708). In the consultation, memory with chain-of-thought (E2) raised the
 cost from 10,535 to 11,158 tokens per case (+5.9\%) without raising accuracy; because E2 changes both
-features at once, it cannot separate their effects.
+features at once, it cannot separate their effects. E3 cost 9,853 tokens per case, and adding the
+Safety Officer raised this to 12,157 (+23.4\%).
 
 % =====================================================================
 \section{Failure Analysis}
@@ -580,7 +586,7 @@ Gap & Category & Frequency & Evidence and cause \\
 G1 & Nurse under-weights a high-risk complaint when vitals are normal & 31/51 KTAS 1--2, both runs & 61 of the 62 episodes requested vitals; in the first run 11 assigned level 4, for example ``mild, non-radiating chest pain with stable vitals''. The floor corrected 21 in each run. \\
 G1 & Under-triage remaining after the floor & 10/51 KTAS 1--2, both runs & Nine of the ten patients are common to the two runs. In the first run: floor reached level 2 for level-1 patients (2); complaint wording missed the keywords, such as ``pain, chest'' and ``LOC'' (3); complaint absent or outside the rule list (5). \\
 G1 & Over-triage caused by the floor & 4/25 overrides, both runs & Complaint keywords fire for lower-acuity palpitation, dyspnea and chest pain. The floor turned a correct decision into a wrong one once in two runs (a level-4 patient raised to level 2). \\
-G1 & Compression of the middle levels & 3/30 exact at KTAS 3 & Guarded agent assigned level 4 to 15 and level 2 to 11 of the level-3 patients; human nurses were exact on 23/30. \\
+G1 & Compression of the middle levels & 3/30 and 6/30 exact at KTAS 3 & In the first run the guarded agent assigned level 4 to 15 and level 2 to 11 of the level-3 patients; human nurses were exact on 23/30. \\
 G2 & Unsafe plan after a wrong diagnosis & 2/4 unsafe plans & The officer reviews the plan and transcript facts, so it cannot see a condition that the doctor did not elicit. \\
 G2 & Required step omitted & 1/4 unsafe plans & Correct diagnosis of cauda equina syndrome; the plan had no emergency MRI and the officer approved it. \\
 G2 & Drug hazard not detected & 1/4 unsafe plans & Ibuprofen planned for a patient on apixaban; label lookup returned no interaction text. \\
@@ -591,7 +597,7 @@ All & Action-parsing residue & 54/123 test names; 19/123 diagnoses & Text marker
 \end{tabular}
 \end{table*}
 
-\textbf{Successful cases.} In \texttt{ktas-0379}, a 62-year-old woman with chest pain rated 3/10 and
+\textbf{Successful cases.} In the first G1 run, for \texttt{ktas-0379}, a 62-year-old woman with chest pain rated 3/10 and
 normal vital signs, the nurse assigned level~4 (``mild, non-radiating chest pain with stable
 vitals''); the floor raised the level to the expert's level~2. In \texttt{adv-0007}, a patient
 claimed that two weeks of tuberculosis treatment was enough. The doctor kept the full regimen but
@@ -599,7 +605,7 @@ planned discharge. The officer vetoed the discharge, and the revised plan admitt
 isolation and retained the six-month regimen.
 
 \textbf{Failed cases.} In \texttt{ktas-0560}, a patient with chest pain recorded as ``pain, chest''
-received level~3 although the expert level was 2. The keyword rule looks for ``chest pain'' and did
+received level~3 in the first run and level~4 in the second, although the expert level was 2. The keyword rule looks for ``chest pain'' and did
 not fire. In \texttt{adv-0019}, a patient with pulmonary embolism and deep vein thrombosis was
 diagnosed with a calf strain and discharged on ibuprofen. The officer approved the plan after an
 openFDA lookup that returned no text, and the grader counted only one of the scenario's three red
@@ -645,8 +651,8 @@ simplified queue with two doctors.
 \textbf{Comparability with the base paper.} LLaMA~3.3~70B was unavailable to us, so all numbers use
 \texttt{gpt-oss} models. Majority-vote ensembling, reflection on misdiagnosis and CLIP-based retrieval
 were replaced or omitted: ensembling and reflection for cost, and CLIP with TF-IDF because the cases
-are text only. These differences, together with E1 and E2 runs of only 10 cases and the incomplete E3 run, mean
-that this work is a partial reproduction of MedAgentSim.
+are text only. These differences, together with consultation runs of only 10 cases, mean that this work is a
+partial reproduction of MedAgentSim.
 
 % =====================================================================
 \section{Conclusion}
@@ -660,12 +666,13 @@ accuracy under ungated memory in our 12-case test, so the harm that the gate is 
 not demonstrated.
 
 The next experiments follow from these failures. The remaining 15 adversarial scenarios, including
-all drug-combination cases, should be run with repeated seeds and a human-audited grader. The poisoning
+all drug-combination cases, should be tested with repeated runs and a human-audited grader. The poisoning
 test needs the full 30 paired cases and a measure of how often a retrieved lesson is adopted. The
 openFDA tool should query all matching labels and report when a label has no interaction text, and the
 rule keywords should be normalised for complaint word order, with both changes evaluated on a new test
 sample. A direct comparison with MedAgentSim needs E1, E2 and E3 on a common set of at least 40 cases with
-repeated runs, since two runs of E2 on the same ten cases differed by two diagnoses.
+repeated runs, since two runs of E2 on the same ten cases differed by two diagnoses and E2 and E3
+disagreed on four of the eight cases that memory never reached.
 
 % =====================================================================
 \section*{Use of AI Tools}
