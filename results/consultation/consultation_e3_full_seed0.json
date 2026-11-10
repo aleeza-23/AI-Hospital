@@ -1,0 +1,76 @@
+{
+  "config": "e3_full",
+  "run_name": "consultation_e3_full",
+  "seed": 0,
+  "mock": false,
+  "memory": "gated",
+  "safety": "officer",
+  "cot": true,
+  "max_turns": 20,
+  "subset_seed": 0,
+  "case_ids": [
+    "medqa-0006",
+    "medqa-0040",
+    "medqa-0048",
+    "medqa-0056",
+    "medqa-0060",
+    "medqa-0062",
+    "medqa-0065",
+    "medqa-0075",
+    "medqa-0076",
+    "medqa-0079"
+  ],
+  "num_cases": 10,
+  "accuracy": 0.6,
+  "accuracy_ci95": [
+    0.3127,
+    0.8318
+  ],
+  "num_correct": 6,
+  "avg_turns": 7.1,
+  "avg_tests": 3.6,
+  "timeout_rate": 0.0,
+  "error_rate": 0.0,
+  "total_prompt_tokens": 101801,
+  "total_completion_tokens": 19770,
+  "total_latency_s": 151.11,
+  "per_role_usage": {
+    "doctor": {
+      "prompt_tokens": 50886,
+      "completion_tokens": 13667,
+      "calls": 85,
+      "latency_s": 81.12181189912371
+    },
+    "patient": {
+      "prompt_tokens": 11964,
+      "completion_tokens": 1509,
+      "calls": 25,
+      "latency_s": 19.220330100739375
+    },
+    "measurement": {
+      "prompt_tokens": 25554,
+      "completion_tokens": 2367,
+      "calls": 36,
+      "latency_s": 28.402449099812657
+    },
+    "safety_officer": {
+      "prompt_tokens": 11853,
+      "completion_tokens": 1883,
+      "calls": 14,
+      "latency_s": 15.19019760005176
+    },
+    "judge": {
+      "prompt_tokens": 1544,
+      "completion_tokens": 344,
+      "calls": 10,
+      "latency_s": 7.17461770051159
+    }
+  },
+  "tokens_per_case": 12157.1,
+  "latency_s_per_case": 15.11,
+  "failure_rate": 0.0,
+  "memory_entries_active": 10,
+  "memory_entries_retracted": 0,
+  "cases_with_memory_context": 1,
+  "safety_interventions": 4
+}

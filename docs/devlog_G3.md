@@ -10,14 +10,15 @@ subset, neither of which was tuned on.
 **Poisoning: done** (`--limit 12`, 1 seed, 48 episodes, zero errors) — see the 2026-11-09 row
 and `results/memory/`.
 
-**Consultation E1 / E2: done** (n=10, 1 seed, 2026-11-10) — see the 2026-11-10 row and
-`results/consultation/`. E1 0.60, E2 0.50; at n=10 memory+CoT shows no benefit (CIs overlap,
-cold-start), so these establish the pipeline, not a comparison. **E3 / E3_full: still to run**
-on the same n=10 budget. A larger subset (brief: 30-50) is the real target once quota allows:
+**Consultation E1 / E2 / E3 / E3_full: done** (n=10, 1 seed, 2026-11-10) — see the two
+2026-11-10 rows and `results/consultation/`. E1 0.60, E2 0.50, E3 0.90, E3_full 0.60. **These
+numbers are not interpretable as a treatment effect**: all four 95% CIs overlap, memory touched
+only 1-2 cases per run, and E3 vs E3_full (both gated-memory configs) differ by 3 cases, which is
+the signature of run-to-run sampling noise at n=10 / 1 seed, not of the gate. The run establishes
+the full pipeline end to end; the reportable comparison needs the larger subset:
 
 ```bash
-python experiments/run_consultation.py --configs e3 e3_full --n 10 --resume   # finish the set
-python experiments/run_consultation.py --configs all --n 30 --resume          # the reportable run
+python experiments/run_consultation.py --configs all --n 30 --seeds 3 --resume   # the reportable run
 ```
 
 Everything else below was measured offline with `MockProvider` and the committed data.
@@ -50,8 +51,8 @@ Everything else below was measured offline with `MockProvider` and the committed
 | 2026-11-09 | **`cases_retrieving_a_wrong_lesson` was overcounted, and the committed clean-arm figure was impossible.** `ungated_clean` reported a wrong lesson retrieved for 1 of 12 cases, in the arm where nothing is ever injected. Cause: the matcher tested whether the first 80 characters of a lesson appeared in `EpisodeResult.memory_context`, but every lesson opens by restating the case objective, and for **6 of the 10** that restatement is longer than 80 characters — so an ordinary episode-derived record for the same case matched. The false hit was `medqa_ext-0185`, whose context held an episode entry with insight "Recorded from an unverified episode outcome." | Match the `Lesson:` field of the context line instead. Only a submitted lesson carries its own text there; an episode entry carries "Confirmed correct." or "Recorded from an unverified episode outcome." | `ungated_clean` corrected from **1 to 0** (rate 0.0833 to 0.0), which is what the clean arm must report by construction. The other three arms were unaffected: ungated poisoned stays **10/12**, both gated arms **0/12**. Accuracy figures unchanged. Regression tests added. |
 | 2026-11-09 | Correcting that metric would normally mean re-running the arms, i.e. spending ~389K tokens again to fix an arithmetic error. | Added `--recompute`, which re-derives every number from the committed logs with no provider, no API key and no model call. The memory is replayed offline — pre-fill, inject, then walk the logged episodes calling `context_for` and `add`, which are pure Python — so entries, retractions and the audit trail are reproduced exactly. | All four arms recomputed for **0 tokens**. `replayed_context_matches` is **true** for all four, i.e. the replayed retrieval agrees with the `memory_context` stored in the log case for case, which is what makes the replay trustworthy. |
 | 2026-11-09 | **Both G3 runners froze transient failures into their results on resume.** `run_safety.py` had been fixed to treat an errored episode as not-done, but `run_consultation.py` and `run_memory_poisoning.py` still counted an `ERROR` status as finished, so a provider 400 or a dropped connection would be kept permanently and never retried. The consultation runs have not happened yet and will certainly be resumed across daily token caps, so this would have corrupted them. | Ported the fix to both: on resume, errored episodes are dropped and the log is rewritten without them, so only completed episodes are skipped. | The committed poisoning logs contain 48 episodes, all `diagnosed`, so nothing already measured was affected. Both runners verified fresh and resumed under `--mock`. |
-| 2026-11-10 | Consultation **E1** (no features) and **E2** (ungated memory + CoT, the MedAgentSim reproduction) on the n=10 MedQA test subset (seed 0), gpt-oss-120b, 1 seed. E3 / E3_full still to run. | Ran `run_consultation.py --configs e1 e2 --n 10`. | E1 accuracy **0.60** (95% CI [0.313, 0.832]); E2 **0.50** (95% CI [0.237, 0.763]). **Memory + CoT did not help at this size, and the CIs fully overlap, so this is a null, not a regression.** The cause is visible in the metrics: only **2 of 10** E2 cases retrieved any memory context (`cases_with_memory_context=2`, `memory_entries_active=8`), because memory starts empty and fills over the run — a cold-start effect that dominates at n=10. A larger subset (brief: 30-50) is needed before E2 vs E1 means anything; at n=10 this run establishes the pipeline and the honest fact that 10 cases cannot show a memory benefit. |
-| pending | — | Consultation **E3** (gated memory + CoT) and **E3_full** (+ Safety Officer) | running after E1/E2; same n=10 budget |
+| 2026-11-10 | Consultation **E1** (no features) and **E2** (ungated memory + CoT, the MedAgentSim reproduction) on the n=10 MedQA test subset (seed 0), gpt-oss-120b, 1 seed. E3 / E3_full are in the next row. | Ran `run_consultation.py --configs e1 e2 --n 10`. | E1 accuracy **0.60** (95% CI [0.313, 0.832]); E2 **0.50** (95% CI [0.237, 0.763]). **Memory + CoT did not help at this size, and the CIs fully overlap, so this is a null, not a regression.** The cause is visible in the metrics: only **2 of 10** E2 cases retrieved any memory context (`cases_with_memory_context=2`, `memory_entries_active=8`), because memory starts empty and fills over the run — a cold-start effect that dominates at n=10. A larger subset (brief: 30-50) is needed before E2 vs E1 means anything; at n=10 this run establishes the pipeline and the honest fact that 10 cases cannot show a memory benefit. |
+| 2026-11-10 | Consultation **E3** (gated memory + CoT) and **E3_full** (gated memory + CoT + Safety Officer) on the same n=10 subset, gpt-oss-120b, 1 seed (finished on two fresh keys after the first attempt stalled on quota). | Ran `run_consultation.py --configs e3 e3_full --n 10 --resume`. | E3 accuracy **0.90** (95% CI [0.596, 0.982]); E3_full **0.60** (95% CI [0.313, 0.832]). With E1 0.60 and E2 0.50, E3's 0.90 is the top score — **but it is not attributable to the gate and is not reported as a SafeWard win.** Two independent checks say it is sampling noise: (1) memory was retrieved in only **2 of 10** E3 cases (`cases_with_memory_context=2`), so a mechanism touching 2 cases cannot produce the 4-case jump from E2; (2) **E3_full also uses gated memory and scored 0.60**, i.e. two configs sharing the treatment differ by 3 cases — pure run-to-run variance at n=10 / 1 seed, where all four CIs overlap. The officer was active in E3_full (`safety_interventions=4`) and cost ~23% more tokens/case (12.2K vs 9.9K). Honest reading: the consultation pipeline runs end to end for all four configs, and **no accuracy claim (memory helps, gate is neutral, officer is free) is testable at this size.** The reportable run is `--n 30 --seeds 3`. |
 | pending | — | `DOCTOR_COT` and `DOCTOR_MEMORY` prompt tuning on dev | not done (budget; prompts left un-tuned rather than overfit) |
 
 ## Design decisions worth stating in the paper
@@ -96,7 +97,9 @@ refuses to store an outcome the officer vetoed.
 
 ## Not done
 
-- **Every experiment.** No run has been executed against a real model.
-- **Prompt tuning.** `DOCTOR_COT` and `DOCTOR_MEMORY` are unchanged from Phase 1. The brief permits
-  tuning them on dev results, which do not exist yet.
+- **A reportable-size run.** Everything so far is n=10-12 at 1 seed, which fixes the pipeline but
+  resolves no accuracy claim (all consultation CIs overlap). The real run is `--configs all --n 30
+  --seeds 3` for consultation and a larger `--limit` with multiple seeds for poisoning.
+- **Prompt tuning.** `DOCTOR_COT` and `DOCTOR_MEMORY` are unchanged from Phase 1. Left un-tuned on
+  purpose (budget, and to avoid overfitting the tiny dev set) rather than silently adjusted.
 - **The README sentence** above has not been added to `README.md`, which is not a G3 file.
